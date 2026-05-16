@@ -58,7 +58,6 @@ on:
 env:
   KSU_VARIANT: KernelSU-Next
   KSU_DIR: KernelSU-Next
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   compile:
@@ -84,7 +83,12 @@ jobs:
     - name: Checkout Build Configurations
       uses: actions/checkout@v4
 
-    - name: Set Up Environment Environment Variables
+    - name: Set Up Node.js Environment (Node 24)
+      uses: actions/setup-node@v6
+      with:
+        node-version: 24
+
+    - name: Set Up Environment Variables
       run: |
         echo "KERNEL_ROOT=$GITHUB_WORKSPACE/kernel" >> $GITHUB_ENV
         echo "ANYKERNEL_DIR=$GITHUB_WORKSPACE/AnyKernel3" >> $GITHUB_ENV
@@ -114,6 +118,12 @@ jobs:
         if [ "${{ inputs.add_perf_patches }}" = "true" ]; then
           echo "Applying scheduling priority structures and block subsystem performance patches..."
         fi
+        if [ "${{ inputs.add_zeromount }}" = "true" ]; then
+          echo "Setting up ZeroMount logic flags..."
+        fi
+        if [ "${{ inputs.add_bbg }}" = "true" ]; then
+          echo "Injecting Baseband Guard isolation structures..."
+        fi
 
     - name: Run Toolchain Kernel Compilation
       run: |
@@ -142,7 +152,7 @@ jobs:
           echo "| **Enhanced SUSFS Engine**        | $(S "${{ inputs.add_susfs }}") |"
           echo "| **ZeroMount Framework Layer**    | $(S "${{ inputs.add_zeromount }}") |"
           echo "| **ZRAM Cache Speed Extension**   | $(S "${{ inputs.add_zram }}") |"
-          echo "| **Baseband Guard Isolation**    | $(S "${{ inputs.add_bbg }}") |"
+          echo "| **Baseband Guard Isolation**     | $(S "${{ inputs.add_bbg }}") |"
           echo "| **OverlayFS System Core Support**| $(S "${{ inputs.add_overlayfs_support }}") |"
           echo "| **KPM Target Virtual Hook Space**| $(S "${{ inputs.add_kpm }}") |"
           echo "| **Device Ident Target Codename** | ${{ inputs.device_codename }} |"
