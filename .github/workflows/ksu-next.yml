@@ -54,7 +54,7 @@ on:
 env:
   KSU_VARIANT: KernelSU-Next
   KSU_DIR: KernelSU-Next
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 
 jobs:
   compile:
