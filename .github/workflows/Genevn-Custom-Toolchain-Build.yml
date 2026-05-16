@@ -1,4 +1,4 @@
-name: Custom Kernel Build
+name: Genevn Custom Toolchain Build
 
 permissions:
   contents: write
@@ -62,7 +62,6 @@ jobs:
     
     steps:
       # Step 1: Parse the user dropdown targets locally
-      # biographical data parsing
       - name: Parse Target Details
         id: parse
         run: |
