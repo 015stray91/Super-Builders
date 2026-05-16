@@ -89,3 +89,66 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang lld llvm gcc-aarch64-linux-gnu binutils bc bison flex libssl-dev libelf-dev cpio kmod python3
+     
+      # Step 5: Run the Genevn Custom Kernel Build Execution
+      - name: Compile Genevn Kernel
+        env:
+          KSU_VARIANT: ${{ inputs.ksu_variant }}
+          ADD_SUSFS: ${{ inputs.add_susfs }}
+          ADD_ZEROMOUNT: ${{ inputs.add_zeromount }}
+          ADD_ZRAM: ${{ inputs.add_zram }}
+          ADD_BBG: ${{ inputs.add_bbg }}
+          ADD_OVERLAYFS: ${{ inputs.add_overlayfs_support }}
+          ADD_KPM: ${{ inputs.add_kpm }}
+          SUKISU_COMMIT: ${{ inputs.sukisu_commit }}
+          CODENAME: ${{ steps.parse.outputs.codename }}
+        run: |
+          echo "================================================="
+          echo " Starting Kernel Compilation for: $CODENAME"
+          echo "================================================="
+          
+          # 1. Handle KernelSU / Variant Selection
+          echo "Configuring KernelSU Variant: $KSU_VARIANT"
+          if [ ! -z "$SUKISU_COMMIT" ]; then
+            echo "Using custom KSU commit override: $SUKISU_COMMIT"
+          fi
+          # [Insert your git clone / setup lines for KSU here]
+
+          # 2. Conditional Feature Patches
+          if [ "$ADD_SUSFS" = "true" ]; then
+            echo "Applying SUSFS patches..."
+            # [Insert your SUSFS patching or file copying commands here]
+          fi
+
+          if [ "$ADD_ZEROMOUNT" = "true" ]; then
+            echo "Enabling ZeroMount..."
+            # [Insert ZeroMount implementation here]
+          fi
+
+          if [ "$ADD_ZRAM" = "true" ]; then
+            echo "Configuring ZRAM with LZ4K..."
+            # [Insert defconfig edits or configuration fragments here]
+          fi
+
+          if [ "$ADD_BBG" = "true" ]; then
+            echo "Enabling Baseband Guard..."
+            # [Insert Baseband Guard configurations here]
+          fi
+
+          if [ "$ADD_OVERLAYFS" = "true" ]; then
+            echo "Enabling overlayfs support..."
+            # [Insert overlayfs config flags here]
+          fi
+
+          if [ "$ADD_KPM" = "true" ]; then
+            echo "Integrating KPM Modules..."
+            # [Insert KPM setup logic here]
+          fi
+
+          echo "================================================="
+          echo " Launching Toolchain Compiler"
+          echo "================================================="
+          # Insert your actual compilation execution commands below, for example:
+          # make O=out ARCH=arm64 msm_defconfig
+          # make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang-18 LLVM=1
+          
