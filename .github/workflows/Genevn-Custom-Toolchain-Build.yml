@@ -71,21 +71,21 @@ jobs:
           echo "os_patch_level=2024-05" >> "$GITHUB_OUTPUT"
           echo "codename=Genevn" >> "$GITHUB_OUTPUT"
 
-      # Step 2: Clean the environment disk space
+      # Step 2: Clean the environment disk space 
       - name: Free Disk Space
         uses: endersonmenezes/free-disk-space@v3
         with:
           remove_android: true
           remove_tool_cache: true
 
-      # Step 3: Checkout your repository configurations
-      - uses: actions/checkout@v4
+      # Step 3: Checkout your repository configurations using Node 24 native action
+      - uses: actions/checkout@v5
         with:
           sparse-checkout: device-profiles.json
           sparse-checkout-cone-mode: false
 
-      # Step 4: Environment Build Test Setup
+      # Step 4: Environment Build Test Setup (Cleaned up apt flags to prevent premature shell exits)
       - name: Initialize Toolchain Environment
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq clang lld llvm gcc-aarch64-linux-gnu binutils bc bison flex libssl-dev libelf-dev cpio kmod python3
+          sudo apt-get update
+          sudo apt-get install -y clang lld llvm gcc-aarch64-linux-gnu binutils bc bison flex libssl-dev libelf-dev cpio kmod python3
