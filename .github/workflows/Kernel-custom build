@@ -1,0 +1,102 @@
+name: Custom Kernel Build
+
+permissions:
+  contents: write
+  actions: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_target:
+        description: "Kernel target"
+        type: choice
+        default: "android12-5.10.209 (2024-05)"
+        options:
+          - "android12-5.10.209 (2024-05)"
+      quick_target:
+        description: "Quick select — type e.g. android15-6.6.58 (overrides dropdown)"
+        type: string
+        default: ""
+      ksu_variant:
+        description: "KernelSU variant"
+        type: choice
+        options:
+          - KernelSU-Next
+          - SukiSU
+          - ReSukiSU
+          - WKSU
+        default: "KernelSU-Next"
+      add_susfs:
+        description: "Add SUSFS"
+        type: boolean
+        default: true
+      add_zeromount:
+        description: "Add ZeroMount"
+        type: boolean
+        default: true
+      add_zram:
+        description: "Add ZRAM with LZ4K"
+        type: boolean
+        default: true
+      add_bbg:
+        description: "Add Baseband Guard"
+        type: boolean
+        default: true
+      add_overlayfs_support:
+        description: "Add overlayfs support"
+        type: boolean
+        default: true
+      add_kpm:
+        description: "Add KPM (SukiSU/ReSukiSU)"
+        type: boolean
+        default: false
+      sukisu_commit:
+        description: "KSU commit override (empty = latest)"
+        type: string
+        default: ""
+
+jobs:
+  resolve:
+    name: Resolve Target
+    runs-on: ubuntu-latest
+    outputs:
+      android_version: ${{ steps.parse.outputs.android_version }}
+      kernel_version: ${{ steps.parse.outputs.kernel_version }}
+      sub_level: ${{ steps.parse.outputs.sub_level }}
+      os_patch_level: ${{ steps.parse.outputs.os_patch_level }}
+      device_codename: ${{ steps.device.outputs.codename }}
+    steps:
+      - name: Parse kernel_target
+        id: parse
+        run: |
+          echo "android_version=android12" >> "$GITHUB_OUTPUT"
+          echo "kernel_version=5.10" >> "$GITHUB_OUTPUT"
+          echo "sub_level=209" >> "$GITHUB_OUTPUT"
+          echo "os_patch_level=2024-05" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: device-profiles.json
+          sparse-checkout-cone-mode: false
+
+      - name: Resolve device identity
+        id: device
+        run: |
+          echo "codename=Genevn" >> "$GITHUB_OUTPUT"
+
+  trigger-compiler:
+    needs: resolve
+    uses: ./.github/workflows/build-ksu-next.yml
+    with:
+      android_version: ${{ needs.resolve.outputs.android_version }}
+      kernel_version: ${{ needs.resolve.outputs.kernel_version }}
+      sub_level: ${{ needs.resolve.outputs.sub_level }}
+      os_patch_level: ${{ needs.resolve.outputs.os_patch_level }}
+      add_susfs: ${{ github.event.inputs.add_susfs == 'true' }}
+      add_zeromount: ${{ github.event.inputs.add_zeromount == 'true' }}
+      add_zram: ${{ github.event.inputs.add_zram == 'true' }}
+      add_bbg: ${{ github.event.inputs.add_bbg == 'true' }}
+      add_overlayfs_support: ${{ github.event.inputs.add_overlayfs_support == 'true' }}
+      add_kpm: ${{ github.event.inputs.add_kpm == 'true' }}
+      sukisu_commit: ${{ github.event.inputs.sukisu_commit }}
+      device_codename: ${{ needs.resolve.outputs.device_codename }}
