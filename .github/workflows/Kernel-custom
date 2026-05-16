@@ -50,6 +50,14 @@ on:
         description: "Add KPM (SukiSU/ReSukiSU)"
         type: boolean
         default: false
+      add_ptrace_fix:
+        description: "Add Ptrace bypass mitigation"
+        type: boolean
+        default: false
+      add_perf_patches:
+        description: "Add Block/Scheduler Performance Patches"
+        type: boolean
+        default: false
       sukisu_commit:
         description: "KSU commit override (empty = latest)"
         type: string
@@ -74,7 +82,7 @@ jobs:
           echo "sub_level=209" >> "$GITHUB_OUTPUT"
           echo "os_patch_level=2024-05" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
         with:
           sparse-checkout: device-profiles.json
           sparse-checkout-cone-mode: false
@@ -92,11 +100,13 @@ jobs:
       kernel_version: ${{ needs.resolve.outputs.kernel_version }}
       sub_level: ${{ needs.resolve.outputs.sub_level }}
       os_patch_level: ${{ needs.resolve.outputs.os_patch_level }}
-      add_susfs: ${{ github.event.inputs.add_susfs == 'true' }}
-      add_zeromount: ${{ github.event.inputs.add_zeromount == 'true' }}
-      add_zram: ${{ github.event.inputs.add_zram == 'true' }}
-      add_bbg: ${{ github.event.inputs.add_bbg == 'true' }}
-      add_overlayfs_support: ${{ github.event.inputs.add_overlayfs_support == 'true' }}
-      add_kpm: ${{ github.event.inputs.add_kpm == 'true' }}
-      sukisu_commit: ${{ github.event.inputs.sukisu_commit }}
       device_codename: ${{ needs.resolve.outputs.device_codename }}
+      add_susfs: ${{ inputs.add_susfs }}
+      add_zeromount: ${{ inputs.add_zeromount }}
+      add_zram: ${{ inputs.add_zram }}
+      add_bbg: ${{ inputs.add_bbg }}
+      add_overlayfs_support: ${{ inputs.add_overlayfs_support }}
+      add_kpm: ${{ inputs.add_kpm }}
+      add_ptrace_fix: ${{ inputs.add_ptrace_fix }}
+      add_perf_patches: ${{ inputs.add_perf_patches }}
+      sukisu_commit: ${{ inputs.sukisu_commit }}
