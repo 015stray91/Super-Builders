@@ -50,63 +50,47 @@ on:
         description: "Add KPM (SukiSU/ReSukiSU)"
         type: boolean
         default: false
-      add_ptrace_fix:
-        description: "Add Ptrace bypass mitigation"
-        type: boolean
-        default: false
-      add_perf_patches:
-        description: "Add Block/Scheduler Performance Patches"
-        type: boolean
-        default: false
       sukisu_commit:
         description: "KSU commit override (empty = latest)"
         type: string
         default: ""
 
 jobs:
-  resolve:
-    name: Resolve Target
+  build:
+    name: "Build Custom Kernel - Genevn"
     runs-on: ubuntu-latest
-    outputs:
-      android_version: ${{ steps.parse.outputs.android_version }}
-      kernel_version: ${{ steps.parse.outputs.kernel_version }}
-      sub_level: ${{ steps.parse.outputs.sub_level }}
-      os_patch_level: ${{ steps.parse.outputs.os_patch_level }}
-      device_codename: ${{ steps.device.outputs.codename }}
+    
     steps:
-      - name: Parse kernel_target
+      # Step 1: Parse the user dropdown targets locally
+       biographical data parsing
+      - name: Parse Target Details
         id: parse
         run: |
           echo "android_version=android12" >> "$GITHUB_OUTPUT"
           echo "kernel_version=5.10" >> "$GITHUB_OUTPUT"
           echo "sub_level=209" >> "$GITHUB_OUTPUT"
           echo "os_patch_level=2024-05" >> "$GITHUB_OUTPUT"
+          echo "codename=Genevn" >> "$GITHUB_OUTPUT"
 
+      # Step 2: Clean the environment disk space
+      - name: Free Disk Space
+        uses: endersonmenezes/free-disk-space@v3
+        with:
+          remove_android: true
+          remove_tool_cache: true
+
+      # Step 3: Checkout your repository configurations
       - uses: actions/checkout@v4
         with:
           sparse-checkout: device-profiles.json
           sparse-checkout-cone-mode: false
 
-      - name: Resolve device identity
-        id: device
+      # Step 4: Environment Build Test Setup
+      - name: Initialize Toolchain Environment
         run: |
-          echo "codename=Genevn" >> "$GITHUB_OUTPUT"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang lld llvm gcc-aarch64-linux-gnu binutils bc bison flex libssl-dev libelf-dev cpio kmod python3
 
-  trigger-compiler:
-    needs: resolve
-    uses: ./.github/workflows/build-ksu-next.yml
-    with:
-      android_version: ${{ needs.resolve.outputs.android_version }}
-      kernel_version: ${{ needs.resolve.outputs.kernel_version }}
-      sub_level: ${{ needs.resolve.outputs.sub_level }}
-      os_patch_level: ${{ needs.resolve.outputs.os_patch_level }}
-      device_codename: ${{ needs.resolve.outputs.device_codename }}
-      add_susfs: ${{ inputs.add_susfs }}
-      add_zeromount: ${{ inputs.add_zeromount }}
-      add_zram: ${{ inputs.add_zram }}
-      add_bbg: ${{ inputs.add_bbg }}
-      add_overlayfs_support: ${{ inputs.add_overlayfs_support }}
-      add_kpm: ${{ inputs.add_kpm }}
-      add_ptrace_fix: ${{ inputs.add_ptrace_fix }}
-      add_perf_patches: ${{ inputs.add_perf_patches }}
-      sukisu_commit: ${{ inputs.sukisu_commit }}
+      # NOTE: This is where your custom build steps from build-ksu-next.yml 
+      # run directly using the clean inputs context below:
+      # e.g., ${{ inputs.add_zram }}, ${{ inputs.add_zeromount }}, etc.
