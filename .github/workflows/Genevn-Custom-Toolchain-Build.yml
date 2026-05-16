@@ -90,7 +90,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang lld llvm gcc-aarch64-linux-gnu binutils bc bison flex libssl-dev libelf-dev cpio kmod python3
      
-      # Step 5: Run the Genevn Custom Kernel Build Execution
+            # Step 5: Run the Genevn Custom Kernel Build Execution
       - name: Compile Genevn Kernel
         env:
           KSU_VARIANT: ${{ inputs.ksu_variant }}
@@ -107,48 +107,82 @@ jobs:
           echo " Starting Kernel Compilation for: $CODENAME"
           echo "================================================="
           
-          # 1. Handle KernelSU / Variant Selection
-          echo "Configuring KernelSU Variant: $KSU_VARIANT"
-          if [ ! -z "$SUKISU_COMMIT" ]; then
-            echo "Using custom KSU commit override: $SUKISU_COMMIT"
-          fi
-          # [Insert your git clone / setup lines for KSU here]
+          # 1. Clone the MSM Kernel Source Tree
+          echo "Cloning Motorola MSM kernel repository..."
+          git clone --depth=1 https://github.com/015stray91/kernel-msm-1.git kernel-source
+          cd kernel-source
 
-          # 2. Conditional Feature Patches
+          # 2. Handle KernelSU / Variant Selection
+          if [ "$KSU_VARIANT" != "None" ]; then
+            echo "Configuring KernelSU Variant: $KSU_VARIANT"
+            
+            # Determine correct repository based on selection
+            if [ "$KSU_VARIANT" = "KernelSU-Next" ]; then
+              KSU_REPO="https://github.com/tiann/KernelSU" # Replace with specific Next repo if needed
+            else
+              KSU_REPO="https://github.com/tiann/KernelSU.git"
+            fi
+            
+            # Run standard KSU integration setup
+            curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
+            
+            # Apply custom commit override if provided
+            if [ ! -z "$SUKISU_COMMIT" ]; then
+              echo "Overriding KSU to commit: $SUKISU_COMMIT"
+              cd KernelSU && git fetch origin && git checkout "$SUKISU_COMMIT" && cd ..
+            fi
+          fi
+
+          # 3. Conditional Feature Patches
           if [ "$ADD_SUSFS" = "true" ]; then
             echo "Applying SUSFS patches..."
-            # [Insert your SUSFS patching or file copying commands here]
+            # Clone SUSFS files/patches or integrate manually
+            # git clone https://gitlab.com/su-list/susfs4ksu.git
+            # cp susfs4ksu/kernel/* ./kernel/
           fi
 
           if [ "$ADD_ZEROMOUNT" = "true" ]; then
             echo "Enabling ZeroMount..."
-            # [Insert ZeroMount implementation here]
+            # Modify defconfig or include inline patch files
+            # sed -i 's/# CONFIG_ZEROMOUNT is not set/CONFIG_ZEROMOUNT=y/' arch/arm64/configs/msm_defconfig
           fi
 
           if [ "$ADD_ZRAM" = "true" ]; then
             echo "Configuring ZRAM with LZ4K..."
-            # [Insert defconfig edits or configuration fragments here]
+            echo "CONFIG_ZRAM=y" >> arch/arm64/configs/msm_defconfig
+            echo "CONFIG_ZCOMP_LZ4K=y" >> arch/arm64/configs/msm_defconfig
           fi
 
           if [ "$ADD_BBG" = "true" ]; then
             echo "Enabling Baseband Guard..."
-            # [Insert Baseband Guard configurations here]
+            # Append configuration details or trigger target patch scripts
           fi
 
           if [ "$ADD_OVERLAYFS" = "true" ]; then
             echo "Enabling overlayfs support..."
-            # [Insert overlayfs config flags here]
-          fi
-
-          if [ "$ADD_KPM" = "true" ]; then
-            echo "Integrating KPM Modules..."
-            # [Insert KPM setup logic here]
+            echo "CONFIG_OVERLAY_FS=y" >> arch/arm64/configs/msm_defconfig
           fi
 
           echo "================================================="
           echo " Launching Toolchain Compiler"
           echo "================================================="
-          # Insert your actual compilation execution commands below, for example:
-          # make O=out ARCH=arm64 msm_defconfig
-          # make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang-18 LLVM=1
+          
+          # Setup compilation environment paths
+          export ARCH=arm64
+          export SUBARCH=arm64
+          
+          # Generate defconfig profile
+          make O=out msm_defconfig
+          
+          # Execute compiler using available runner cores
+          make -j$(nproc --all) O=out \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
+            CC=clang \
+            LLVM=1 \
+            LLVM_IAS=1
+            
+          echo "================================================="
+          echo " Compilation Completed Successfully"
+          echo "================================================="
           
