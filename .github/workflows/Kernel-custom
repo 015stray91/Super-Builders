@@ -62,7 +62,7 @@ jobs:
     
     steps:
       # Step 1: Parse the user dropdown targets locally
-       biographical data parsing
+      # biographical data parsing
       - name: Parse Target Details
         id: parse
         run: |
@@ -90,7 +90,3 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq clang lld llvm gcc-aarch64-linux-gnu binutils bc bison flex libssl-dev libelf-dev cpio kmod python3
-
-      # NOTE: This is where your custom build steps from build-ksu-next.yml 
-      # run directly using the clean inputs context below:
-      # e.g., ${{ inputs.add_zram }}, ${{ inputs.add_zeromount }}, etc.
