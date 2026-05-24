@@ -172,8 +172,10 @@ jobs:
           export SUBARCH=arm64
           
           # Generate defconfig profile
-          make O=out msm_defconfig
-          
+          make O=out genevn.defconfig
+          make O=out moto-parrot.config
+          make O=out debug-parrot-genevn.config
+          make O=out moto-parrot-genevn.config
           # Execute compiler using available runner cores
           make -j$(nproc --all) O=out \
             CROSS_COMPILE=aarch64-linux-gnu- \
@@ -192,7 +194,7 @@ jobs:
           cd $GITHUB_WORKSPACE
           
           # Use your local custom pre-configured layout instead of cloning a blank remote repo
-          cp -r AnyKernel3-base AnyKernel
+          AnyKernel3
           
           # Locate and copy the generated image binary file out of your 'out' tree
           if [ -f "kernel-source/out/arch/arm64/boot/Image.gz" ]; then
