@@ -186,13 +186,13 @@ jobs:
           echo " Compilation Completed Successfully"
           echo "================================================="
 
-      # Step 6: Assemble the Flashing Framework Bundle
+            # Step 6: Assemble the Flashing Framework Bundle
       - name: Package Kernel via AnyKernel3 Framework
         run: |
           cd $GITHUB_WORKSPACE
           
-          # Fetch the flashing zip container layout
-          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git AnyKernel
+          # Use your local custom pre-configured layout instead of cloning a blank remote repo
+          cp -r AnyKernel3-base AnyKernel
           
           # Locate and copy the generated image binary file out of your 'out' tree
           if [ -f "kernel-source/out/arch/arm64/boot/Image.gz" ]; then
@@ -205,10 +205,6 @@ jobs:
             echo "ERROR: Compiled kernel binary image could not be resolved!" && exit 1
           fi
           
-          # Optional: If you need to include dtb/dtbo files from your build, uncomment below:
-          # cp kernel-source/out/arch/arm64/boot/dtb AnyKernel/ 2>/dev/null || true
-          # cp kernel-source/out/arch/arm64/boot/dtbo.img AnyKernel/ 2>/dev/null || true
-          
           # Prepare flashing block adjustments inside anykernel.sh script
           cd AnyKernel
           sed -i 's/block=\/dev\/block\/bootdevice\/by-name\/boot;/block=auto;/g' anykernel.sh
@@ -216,13 +212,4 @@ jobs:
           
           # Pack everything tightly into a delivery format
           zip -r9 ../Genevn-KernelSU-Next-Flashable.zip *
-
-      # Step 7: Push zip file to GitHub Actions Runner interface
-      - name: Push Flashable ZIP to GitHub Artifacts Storage
-        uses: actions/upload-artifact@v4
-        with:
-          name: Genevn-Next-Kernel-Signed
-          path: Genevn-KernelSU-Next-Flashable.zip
-          compression-level: 9
-          overwrite: true
           
