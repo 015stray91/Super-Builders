@@ -173,9 +173,7 @@ jobs:
           
           # Generate defconfig profile
           make O=out genevn.defconfig
-          make O=out moto-parrot.config
-          make O=out debug-parrot-genevn.config
-          make O=out moto-parrot-genevn.config
+        
           # Execute compiler using available runner cores
           make -j$(nproc --all) O=out \
             CROSS_COMPILE=aarch64-linux-gnu- \
@@ -187,31 +185,24 @@ jobs:
           echo "================================================="
           echo " Compilation Completed Successfully"
           echo "================================================="
-
-            # Step 6: Assemble the Flashing Framework Bundle
+# Step 6: Assemble the Flashing Framework Bundle
       - name: Package Kernel via AnyKernel3 Framework
         run: |
           cd $GITHUB_WORKSPACE
           
-          # Use your local custom pre-configured layout instead of cloning a blank remote repo
-          AnyKernel3
-          
-          # Locate and copy the generated image binary file out of your 'out' tree
-          if [ -f "kernel-source/out/arch/arm64/boot/Image.gz" ]; then
+          # 1. Locate and copy the generated image binary file to the local AnyKernel folder
+          if[ -f "kernel-source/out/arch/arm64/boot/Image.gz" ]; then
             cp kernel-source/out/arch/arm64/boot/Image.gz AnyKernel/
-            echo "Successfully retrieved compressed Image.gz component."
-          elif [ -f "kernel-source/out/arch/arm64/boot/Image" ]; then
+          elif[ -f "kernel-source/out/arch/arm64/boot/Image" ]; then
             cp kernel-source/out/arch/arm64/boot/Image AnyKernel/
-            echo "Successfully retrieved uncompressed Image component."
           else
             echo "ERROR: Compiled kernel binary image could not be resolved!" && exit 1
           fi
           
-          # Prepare flashing block adjustments inside anykernel.sh script
+          # 2. OVERWRITE the existing anykernel.sh with your pre-configured version
+          # This replaces the one inside your AnyKernel folder with the one from your repo path
+          cp .github/workflows/anykernel3/anykernel3.sh AnyKernel/anykernel.sh
+          
+          # 3. Pack everything tightly into a delivery format
           cd AnyKernel
-          sed -i 's/block=\/dev\/block\/bootdevice\/by-name\/boot;/block=auto;/g' anykernel.sh
-          sed -i 's/is_slot_device=0;/is_slot_device=auto;/g' anykernel.sh
-          
-          # Pack everything tightly into a delivery format
           zip -r9 ../Genevn-KernelSU-Next-Flashable.zip *
-          
