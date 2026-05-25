@@ -1,208 +1,34 @@
-name: Genevn Custom Toolchain Build
-
-permissions:
-  contents: write
-  actions: write
-
-on:
-  workflow_dispatch:
-    inputs:
-      kernel_target:
-        description: "Kernel target"
-        type: choice
-        default: "android12-5.10.209 (2024-05)"
-        options:
-          - "android12-5.10.209 (2024-05)"
-      quick_target:
-        description: "Quick select — type e.g. android15-6.6.58 (overrides dropdown)"
-        type: string
-        default: ""
-      ksu_variant:
-        description: "KernelSU variant"
-        type: choice
-        options:
-          - KernelSU-Next
-          - SukiSU
-          - ReSukiSU
-          - WKSU
-        default: "KernelSU-Next"
-      add_susfs:
-        description: "Add SUSFS"
-        type: boolean
-        default: true
-      add_zeromount:
-        description: "Add ZeroMount"
-        type: boolean
-        default: true
-      add_zram:
-        description: "Add ZRAM with LZ4K"
-        type: boolean
-        default: true
-      add_bbg:
-        description: "Add Baseband Guard"
-        type: boolean
-        default: true
-      add_overlayfs_support:
-        description: "Add overlayfs support"
-        type: boolean
-        default: true
-      add_kpm:
-        description: "Add KPM (SukiSU/ReSukiSU)"
-        type: boolean
-        default: false
-      sukisu_commit:
-        description: "KSU commit override (empty = latest)"
-        type: string
-        default: ""
-
-jobs:
-  build:
-    name: "Build Custom Kernel - Genevn"
-    runs-on: ubuntu-latest
-    
-    steps:
-      # Step 1: Parse the user dropdown targets locally
-      - name: Parse Target Details
-        id: parse
+- name: Compile Genevn Kernel
         run: |
-          echo "android_version=android12" >> "$GITHUB_OUTPUT"
-          echo "kernel_version=5.10" >> "$GITHUB_OUTPUT"
-          echo "sub_level=209" >> "$GITHUB_OUTPUT"
-          echo "os_patch_level=2024-05" >> "$GITHUB_OUTPUT"
-          echo "codename=Genevn" >> "$GITHUB_OUTPUT"
-
-      # Step 2: Clean the environment disk space 
-      - name: Free Disk Space
-        uses: endersonmenezes/free-disk-space@v3
-        with:
-          remove_android: true
-          remove_tool_cache: true
-
-      # Step 3: Checkout your repository configurations using Node 24 native action
-      - uses: actions/checkout@v5
-        with:
-          sparse-checkout: device-profiles.json
-          sparse-checkout-cone-mode: false
-
-      # Step 4: Environment Build Test Setup
-      - name: Initialize Toolchain Environment
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang lld llvm gcc-aarch64-linux-gnu binutils bc bison flex libssl-dev libelf-dev cpio kmod python3
-     
-      # Step 5: Run the Genevn Custom Kernel Build Execution
-      - name: Compile Genevn Kernel
-        env:
-          KSU_VARIANT: ${{ inputs.ksu_variant }}
-          ADD_SUSFS: ${{ inputs.add_susfs }}
-          ADD_ZEROMOUNT: ${{ inputs.add_zeromount }}
-          ADD_ZRAM: ${{ inputs.add_zram }}
-          ADD_BBG: ${{ inputs.add_bbg }}
-          ADD_OVERLAYFS: ${{ inputs.add_overlayfs_support }}
-          ADD_KPM: ${{ inputs.add_kpm }}
-          SUKISU_COMMIT: ${{ inputs.sukisu_commit }}
-          CODENAME: ${{ steps.parse.outputs.codename }}
-        run: |
-          echo "================================================="
-          echo " Starting Kernel Compilation for: $CODENAME"
-          echo "================================================="
-          
-          # 1. Clone the MSM Kernel Source Tree
-          echo "Cloning Motorola MSM kernel repository..."
-          git clone --depth=1 https://github.com/015stray91/kernel-msm-1.git kernel-source
           cd kernel-source
-
-          # 2. Handle KernelSU / Variant Selection
-          if [ "$KSU_VARIANT" != "None" ]; then
-            echo "Configuring KernelSU Variant: $KSU_VARIANT"
-            
-            # Determine correct repository based on selection
-            if [ "$KSU_VARIANT" = "KernelSU-Next" ]; then
-              KSU_REPO="https://github.com/tiann/KernelSU" # Replace with specific Next repo if needed
-            else
-              KSU_REPO="https://github.com/tiann/KernelSU.git"
-            fi
-            
-            # Run standard KSU integration setup
-            curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
-            
-            # Apply custom commit override if provided
-            if [ ! -z "$SUKISU_COMMIT" ]; then
-              echo "Overriding KSU to commit: $SUKISU_COMMIT"
-              cd KernelSU && git fetch origin && git checkout "$SUKISU_COMMIT" && cd ..
-            fi
-          fi
-
-          # 3. Conditional Feature Patches
-          if [ "$ADD_SUSFS" = "true" ]; then
-            echo "Applying SUSFS patches..."
-            # Clone SUSFS files/patches or integrate manually
-            # git clone https://gitlab.com/su-list/susfs4ksu.git
-            # cp susfs4ksu/kernel/* ./kernel/
-          fi
-
-          if [ "$ADD_ZEROMOUNT" = "true" ]; then
-            echo "Enabling ZeroMount..."
-            # Modify defconfig or include inline patch files
-            # sed -i 's/# CONFIG_ZEROMOUNT is not set/CONFIG_ZEROMOUNT=y/' arch/arm64/configs/msm_defconfig
-          fi
-
-          if [ "$ADD_ZRAM" = "true" ]; then
-            echo "Configuring ZRAM with LZ4K..."
-            echo "CONFIG_ZRAM=y" >> arch/arm64/configs/msm_defconfig
-            echo "CONFIG_ZCOMP_LZ4K=y" >> arch/arm64/configs/msm_defconfig
-          fi
-
-          if [ "$ADD_BBG" = "true" ]; then
-            echo "Enabling Baseband Guard..."
-            # Append configuration details or trigger target patch scripts
-          fi
-
-          if [ "$ADD_OVERLAYFS" = "true" ]; then
-            echo "Enabling overlayfs support..."
-            echo "CONFIG_OVERLAY_FS=y" >> arch/arm64/configs/msm_defconfig
-          fi
-
-          echo "================================================="
-          echo " Launching Toolchain Compiler"
-          echo "================================================="
           
-          # Setup compilation environment paths
+          # 1. KernelSU Setup
+          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
+          
+          # 2. Set Environment Variables
+          # Keeping these exactly as you need them for the build script to pick up your fragment
           export ARCH=arm64
           export SUBARCH=arm64
+          export VARIANT=gki
+          export TARGET_PRODUCT=parrot_genevn
+          export MSM_ARCH=parrot
           
-          # Generate defconfig profile
-          make O=out genevn.defconfig
-        
-          # Execute compiler using available runner cores
-          make -j$(nproc --all) O=out \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
-            CC=clang \
-            LLVM=1 \
-            LLVM_IAS=1
-            
-          echo "================================================="
-          echo " Compilation Completed Successfully"
-          echo "================================================="
-# Step 6: Assemble the Flashing Framework Bundle
-      - name: Package Kernel via AnyKernel3 Framework
+          # 3. Build using your verified toolchain and the moto build system
+          # This triggers the ./build.sh which merges your moto-parrot-genevn.config fragment
+          ./build.sh
+
+      - name: Package Kernel via AnyKernel3
         run: |
           cd $GITHUB_WORKSPACE
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git AnyKernel
           
-          # 1. Locate and copy the generated image binary file to the local AnyKernel folder
-          if[ -f "kernel-source/out/arch/arm64/boot/Image.gz" ]; then
-            cp kernel-source/out/arch/arm64/boot/Image.gz AnyKernel/
-          elif[ -f "kernel-source/out/arch/arm64/boot/Image" ]; then
-            cp kernel-source/out/arch/arm64/boot/Image AnyKernel/
-          else
-            echo "ERROR: Compiled kernel binary image could not be resolved!" && exit 1
-          fi
+          # Copy the binary from the GKI output directory
+          cp kernel-source/out/android12-5.10/dist/Image.gz* AnyKernel/ 2>/dev/null || \
+          cp kernel-source/out/dist/Image.gz* AnyKernel/ 2>/dev/null
           
-          # 2. OVERWRITE the existing anykernel.sh with your pre-configured version
-          # This replaces the one inside your AnyKernel folder with the one from your repo path
+          # Apply your custom anykernel.sh from your repo
           cp .github/workflows/anykernel3/anykernel3.sh AnyKernel/anykernel.sh
           
-          # 3. Pack everything tightly into a delivery format
+          # Zip it up
           cd AnyKernel
           zip -r9 ../Genevn-KernelSU-Next-Flashable.zip *
