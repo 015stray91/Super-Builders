@@ -10,13 +10,12 @@ on:
       ksu_variant:
         description: "KernelSU variant"
         type: choice
-        required: true
-        default: "KernelSU-Next"
         options:
           - KernelSU-Next
           - SukiSU
           - ReSukiSU
           - WKSU
+        default: "KernelSU-Next"
       add_susfs:
         description: "Add SUSFS"
         type: boolean
@@ -30,6 +29,7 @@ jobs:
   build:
     name: "Build Custom Kernel - Genevn"
     runs-on: ubuntu-latest
+    
     steps:
       - name: Free Disk Space
         uses: endersonmenezes/free-disk-space@v3
@@ -37,7 +37,8 @@ jobs:
           remove_android: true
           remove_tool_cache: true
 
-      - uses: actions/checkout@v5
+      - name: Checkout Super-Builders
+        uses: actions/checkout@v5
         with:
           repository: 015stray91/Super-Builders
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -49,20 +50,28 @@ jobs:
 
       - name: Compile Genevn Kernel
         run: |
+          # 1. Clone source
           git clone --depth=1 https://github.com/015stray91/kernel-msm-1.git kernel-source
           cd kernel-source
           
-          # 1. KernelSU Setup
+          # 2. KernelSU Setup
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
           
-          # 2. Set Environment Variables
+          # 3. Initialize Tools & Build Environment
+          # Setting KERNEL_DIR and adding tools/ to PATH as required
+          export KERNEL_DIR=$(pwd)
+          export PATH=${KERNEL_DIR}/tools:$PATH
           export ARCH=arm64
           export SUBARCH=arm64
+          
+          # 4. Set Variables to trigger the fragment merger
+          # Ensure TARGET_PRODUCT matches your file 'moto-parrot-genevn.config'
           export VARIANT=gki
           export TARGET_PRODUCT=parrot_genevn
           export MSM_ARCH=parrot
           
-          # 3. Build using Motorola's build.sh
+          # 5. Run Motorola Build Script
+          # This automatically processes scripts/ and merges ext_config/ fragments
           ./build.sh
 
       - name: Package Kernel via AnyKernel3
@@ -70,14 +79,15 @@ jobs:
           cd $GITHUB_WORKSPACE
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git AnyKernel
           
-          # Copy binary from GKI output directory
+          # Copy binary from dist/ (GKI standard output)
+          # We use a wildcard to ensure we grab the right image
           cp kernel-source/out/android12-5.10/dist/Image.gz* AnyKernel/ 2>/dev/null || \
           cp kernel-source/out/dist/Image.gz* AnyKernel/ 2>/dev/null
           
-          # Apply your custom anykernel.sh
+          # Copy your custom anykernel.sh from your repo
           cp .github/workflows/anykernel3/anykernel3.sh AnyKernel/anykernel.sh
           
-          # Zip it up
+          # Create Flashable Zip
           cd AnyKernel
           zip -r9 ../Genevn-KernelSU-Next-Flashable.zip *
 
