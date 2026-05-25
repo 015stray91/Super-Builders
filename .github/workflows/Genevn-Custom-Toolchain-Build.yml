@@ -1,4 +1,4 @@
-youname: Genevn Custom Toolchain Build
+name: Genevn Custom Toolchain Build
 
 permissions:
   contents: write
