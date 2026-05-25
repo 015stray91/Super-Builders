@@ -1,4 +1,4 @@
-name: Genevn Custom Toolchain Build
+youname: Genevn Custom Toolchain Build
 
 permissions:
   contents: write
@@ -50,28 +50,27 @@ jobs:
 
       - name: Compile Genevn Kernel
         run: |
-          # 1. Clone source
-          git clone --depth=1 https://github.com/015stray91/kernel-msm-1.git kernel-source
           cd kernel-source
           
-          # 2. KernelSU Setup
+          # 1. KernelSU Setup
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
           
-          # 3. Initialize Tools & Build Environment
-          # Setting KERNEL_DIR and adding tools/ to PATH as required
+          # 2. INITIALIZE TOOLS & SCRIPTS DIR
+          # This is the step you requested: we ensure the tools are in the build path.
           export KERNEL_DIR=$(pwd)
           export PATH=${KERNEL_DIR}/tools:$PATH
-          export ARCH=arm64
-          export SUBARCH=arm64
           
-          # 4. Set Variables to trigger the fragment merger
-          # Ensure TARGET_PRODUCT matches your file 'moto-parrot-genevn.config'
+          # 3. SET FRAGMENT MERGER VARIABLES
+          # 'TARGET_PRODUCT' triggers the fragment logic (add_moto_defconfig_fragments)
+          # which looks for 'moto-parrot-genevn.config' and merges it automatically.
+          export ARCH=arm64
           export VARIANT=gki
           export TARGET_PRODUCT=parrot_genevn
           export MSM_ARCH=parrot
           
-          # 5. Run Motorola Build Script
-          # This automatically processes scripts/ and merges ext_config/ fragments
+          # 4. RUN MOTOROLA BUILDER
+          # This script calls the binaries in /scripts/ to merge 
+          # your fragments and drivers into the final Image.gz-dtb
           ./build.sh
 
       - name: Package Kernel via AnyKernel3
