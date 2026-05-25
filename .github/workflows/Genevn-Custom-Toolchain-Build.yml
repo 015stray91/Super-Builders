@@ -10,11 +10,7 @@ on:
       ksu_variant:
         description: "KernelSU variant"
         type: choice
-        options:
-          - KernelSU-Next
-          - SukiSU
-          - ReSukiSU
-          - WKSU
+        options:[KernelSU-Next, SukiSU, ReSukiSU, WKSU]
         default: "KernelSU-Next"
       add_susfs:
         description: "Add SUSFS"
@@ -29,7 +25,6 @@ jobs:
   build:
     name: "Build Custom Kernel - Genevn"
     runs-on: ubuntu-latest
-    
     steps:
       - name: Free Disk Space
         uses: endersonmenezes/free-disk-space@v3
@@ -50,43 +45,48 @@ jobs:
 
       - name: Compile Genevn Kernel
         run: |
+          # 1. Clone source and enter directory
+          git clone --depth=1 https://github.com/015stray91/kernel-msm-1.git kernel-source
           cd kernel-source
           
-          # 1. KernelSU Setup
+          # 2. KernelSU Setup
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
           
-          # 2. INITIALIZE TOOLS & SCRIPTS DIR
-          # This is the step you requested: we ensure the tools are in the build path.
+          # 3. Setup Tools and Build Path
           export KERNEL_DIR=$(pwd)
           export PATH=${KERNEL_DIR}/tools:$PATH
           
-          # 3. SET FRAGMENT MERGER VARIABLES
-          # 'TARGET_PRODUCT' triggers the fragment logic (add_moto_defconfig_fragments)
-          # which looks for 'moto-parrot-genevn.config' and merges it automatically.
+          # 4. Set Motorola GKI Build Variables
           export ARCH=arm64
           export VARIANT=gki
           export TARGET_PRODUCT=parrot_genevn
           export MSM_ARCH=parrot
           
-          # 4. RUN MOTOROLA BUILDER
-          # This script calls the binaries in /scripts/ to merge 
-          # your fragments and drivers into the final Image.gz-dtb
-          ./build.sh
+          # 5. Build (Checking for standard build scripts)
+          if [ -f "./build.sh" ]; then
+            ./build.sh
+          elif[ -f "./build_kernel.sh" ]; then
+            ./build_kernel.sh
+          else
+            echo "--- No build script found, contents of root: ---"
+            ls -F
+            exit 1
+          fi
 
       - name: Package Kernel via AnyKernel3
         run: |
           cd $GITHUB_WORKSPACE
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git AnyKernel
           
-          # Copy binary from dist/ (GKI standard output)
-          # We use a wildcard to ensure we grab the right image
+          # Copy binaries from GKI output directory
           cp kernel-source/out/android12-5.10/dist/Image.gz* AnyKernel/ 2>/dev/null || \
-          cp kernel-source/out/dist/Image.gz* AnyKernel/ 2>/dev/null
+          cp kernel-source/out/dist/Image.gz* AnyKernel/ 2>/dev/null || \
+          cp kernel-source/out/arch/arm64/boot/Image.gz* AnyKernel/ 2>/dev/null
           
-          # Copy your custom anykernel.sh from your repo
+          # Overwrite with your custom script
           cp .github/workflows/anykernel3/anykernel3.sh AnyKernel/anykernel.sh
           
-          # Create Flashable Zip
+          # Zip it up
           cd AnyKernel
           zip -r9 ../Genevn-KernelSU-Next-Flashable.zip *
 
