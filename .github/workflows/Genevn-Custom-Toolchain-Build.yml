@@ -1,20 +1,68 @@
-- name: Compile Genevn Kernel
+name: Genevn Custom Toolchain Build
+
+permissions:
+  contents: write
+  actions: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      ksu_variant:
+        description: "KernelSU variant"
+        type: choice
+        required: true
+        default: "KernelSU-Next"
+        options:
+          - KernelSU-Next
+          - SukiSU
+          - ReSukiSU
+          - WKSU
+      add_susfs:
+        description: "Add SUSFS"
+        type: boolean
+        default: true
+      add_zeromount:
+        description: "Add ZeroMount"
+        type: boolean
+        default: true
+
+jobs:
+  build:
+    name: "Build Custom Kernel - Genevn"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Free Disk Space
+        uses: endersonmenezes/free-disk-space@v3
+        with:
+          remove_android: true
+          remove_tool_cache: true
+
+      - uses: actions/checkout@v5
+        with:
+          repository: 015stray91/Super-Builders
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Initialize Environment
         run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld llvm gcc-aarch64-linux-gnu binutils bc bison flex libssl-dev libelf-dev cpio kmod python3 zip
+
+      - name: Compile Genevn Kernel
+        run: |
+          git clone --depth=1 https://github.com/015stray91/kernel-msm-1.git kernel-source
           cd kernel-source
           
           # 1. KernelSU Setup
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
           
           # 2. Set Environment Variables
-          # Keeping these exactly as you need them for the build script to pick up your fragment
           export ARCH=arm64
           export SUBARCH=arm64
           export VARIANT=gki
           export TARGET_PRODUCT=parrot_genevn
           export MSM_ARCH=parrot
           
-          # 3. Build using your verified toolchain and the moto build system
-          # This triggers the ./build.sh which merges your moto-parrot-genevn.config fragment
+          # 3. Build using Motorola's build.sh
           ./build.sh
 
       - name: Package Kernel via AnyKernel3
@@ -22,13 +70,19 @@
           cd $GITHUB_WORKSPACE
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git AnyKernel
           
-          # Copy the binary from the GKI output directory
+          # Copy binary from GKI output directory
           cp kernel-source/out/android12-5.10/dist/Image.gz* AnyKernel/ 2>/dev/null || \
           cp kernel-source/out/dist/Image.gz* AnyKernel/ 2>/dev/null
           
-          # Apply your custom anykernel.sh from your repo
+          # Apply your custom anykernel.sh
           cp .github/workflows/anykernel3/anykernel3.sh AnyKernel/anykernel.sh
           
           # Zip it up
           cd AnyKernel
           zip -r9 ../Genevn-KernelSU-Next-Flashable.zip *
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Genevn-Next-Kernel-Signed
+          path: Genevn-KernelSU-Next-Flashable.zip
