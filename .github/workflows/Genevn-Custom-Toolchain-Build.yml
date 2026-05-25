@@ -1,97 +1,53 @@
 name: Genevn Custom Toolchain Build
 
-permissions:
-  contents: write
-  actions: write
-
 on:
   workflow_dispatch:
-    inputs:
-      ksu_variant:
-        description: "KernelSU variant"
-        type: choice
-        options:[KernelSU-Next, SukiSU, ReSukiSU, WKSU]
-        default: "KernelSU-Next"
-      add_susfs:
-        description: "Add SUSFS"
-        type: boolean
-        default: true
-      add_zeromount:
-        description: "Add ZeroMount"
-        type: boolean
-        default: true
 
 jobs:
-  build:
-    name: "Build Custom Kernel - Genevn"
+  # Job 1: Setup & Config Merge
+  prepare_config:
     runs-on: ubuntu-latest
+    outputs:
+      config_ready: ${{ steps.merge.outputs.config_ready }}
     steps:
-      - name: Free Disk Space
-        uses: endersonmenezes/free-disk-space@v3
-        with:
-          remove_android: true
-          remove_tool_cache: true
-
-      - name: Checkout Super-Builders
-        uses: actions/checkout@v5
-        with:
-          repository: 015stray91/Super-Builders
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Initialize Environment
+      - uses: actions/checkout@v5
+      - name: Merge Fragments
+        id: merge
         run: |
-          sudo apt-get update
-          sudo apt-get install -y clang lld llvm gcc-aarch64-linux-gnu binutils bc bison flex libssl-dev libelf-dev cpio kmod python3 zip
-
-      - name: Compile Genevn Kernel
-        run: |
-          # 1. Clone source and enter directory
           git clone --depth=1 https://github.com/015stray91/kernel-msm-1.git kernel-source
           cd kernel-source
+          # Inject your custom fragment into the Motorola build path
+          mkdir -p arch/arm64/configs/vendor/ext_config/
+          cp ../.github/configs/moto-parrot-genevn.config arch/arm64/configs/vendor/ext_config/
+          echo "config_ready=true" >> "$GITHUB_OUTPUT"
+          # Upload the prepared source as an artifact to pass to the next job
+          tar -czf source_ready.tar.gz .
+          # (upload this tar in a real implementation)
+
+  # Job 2: Build & Package
+  build_and_package:
+    needs: prepare_config
+    runs-on: ubuntu-latest
+    steps:
+      - name: Compile & Package
+        run: |
+          # Pull down the source/config prepared in Job 1
+          # [Add artifact download here]
+          cd kernel-source
           
-          # 2. KernelSU Setup
-          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
-          
-          # 3. Setup Tools and Build Path
+          # Initialize tools path
           export KERNEL_DIR=$(pwd)
           export PATH=${KERNEL_DIR}/tools:$PATH
           
-          # 4. Set Motorola GKI Build Variables
-          export ARCH=arm64
+          # Run the build
           export VARIANT=gki
           export TARGET_PRODUCT=parrot_genevn
           export MSM_ARCH=parrot
+          ./build.sh
           
-          # 5. Build (Checking for standard build scripts)
-          if [ -f "./build.sh" ]; then
-            ./build.sh
-          elif[ -f "./build_kernel.sh" ]; then
-            ./build_kernel.sh
-          else
-            echo "--- No build script found, contents of root: ---"
-            ls -F
-            exit 1
-          fi
-
-      - name: Package Kernel via AnyKernel3
-        run: |
-          cd $GITHUB_WORKSPACE
+          # Package logic
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git AnyKernel
-          
-          # Copy binaries from GKI output directory
-          cp kernel-source/out/android12-5.10/dist/Image.gz* AnyKernel/ 2>/dev/null || \
-          cp kernel-source/out/dist/Image.gz* AnyKernel/ 2>/dev/null || \
-          cp kernel-source/out/arch/arm64/boot/Image.gz* AnyKernel/ 2>/dev/null
-          
-          # Overwrite with your custom script
-          cp .github/workflows/anykernel3/anykernel3.sh AnyKernel/anykernel.sh
-          
-          # Zip it up
+          cp out/android12-5.10/dist/Image.gz* AnyKernel/
+          cp ../.github/workflows/anykernel3/anykernel3.sh AnyKernel/anykernel.sh
           cd AnyKernel
           zip -r9 ../Genevn-KernelSU-Next-Flashable.zip *
-
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Genevn-Next-Kernel-Signed
-          path: Genevn-KernelSU-Next-Flashable.zip
