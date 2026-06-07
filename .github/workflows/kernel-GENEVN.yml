@@ -63,7 +63,7 @@ on:
 
 jobs:
   build:
-    name: "User Kernel (${{kernel-msm }})"
+    name: "User Kernel
     runs-on: ubuntu-latest
     timeout-minutes: 120
 
