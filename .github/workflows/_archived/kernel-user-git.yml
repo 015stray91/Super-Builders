@@ -1,23 +1,23 @@
 name: Build User Kernel (Git)
 
 permissions:
-  contents: read
+  contents: write
   actions: write
 
 on:
   workflow_dispatch:
     inputs:
       kernel_repo:
-        description: "Kernel source git URL"
+        description: "https://github.com/015stray91/kernel-msm-1.git"
         type: string
         required: true
       kernel_branch:
-        description: "Branch or tag to build"
+        description: "android-release-14-u1tgns34.42-86-2-32"
         type: string
         required: true
       defconfig:
         description: "Defconfig name (relative to arch/arm64/configs/)"
-        type: string
+        type: defconfig
         required: true
       ksu_variant:
         description: "KernelSU variant"
@@ -35,18 +35,18 @@ on:
       add_kpm:
         description: "Add KPM support"
         type: boolean
-        default: false
+        default: true
       kernel_image_name:
         description: "Output image name (Image, Image.gz, Image.lz4)"
-        type: string
+        type: Image.lz4
         default: "Image"
       anykernel_branch:
         description: "AnyKernel3 branch"
         type: string
-        default: "gki-2.0"
+        default: "gki-1.0 legacy"
       extra_make_args:
         description: "Extra make arguments (vendor-specific flags)"
-        type: string
+        type: 
         default: ""
       lto_mode:
         description: "LTO mode"
@@ -55,7 +55,7 @@ on:
           - thin
           - full
           - none
-        default: thin
+        default: full
       susfs_branch:
         description: "SUSFS branch override (auto-detect if empty)"
         type: string
@@ -63,7 +63,7 @@ on:
 
 jobs:
   build:
-    name: "User Kernel (${{ inputs.ksu_variant }})"
+    name: "User Kernel (${{KernelSU-NEXT 5.10 }})"
     runs-on: ubuntu-latest
     timeout-minutes: 120
 
