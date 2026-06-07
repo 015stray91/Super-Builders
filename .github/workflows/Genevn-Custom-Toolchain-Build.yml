@@ -41,8 +41,9 @@ jobs:
           
           # Run the build
           export VARIANT=gki
-          export TARGET_PRODUCT=parrot_genevn
-          export MSM_ARCH=parrot
+          export TARGET_PRODUCT=defconfig
+          export MSM_ARCH
+          export arm64
           ./build.sh
           
           # Package logic
