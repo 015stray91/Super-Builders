@@ -63,12 +63,15 @@ jobs:
           export SUBARCH=arm64
           make O=out defconfig
           
+          # We define the config as an environment variable for the make process
+          # instead of trying to chain it with a backslash
+          export CONFIG_KERNEL_LZ4=y
           make -j$(nproc --all) O=out \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
             CC=clang \
             LLVM=1 \
-            LLVM_IAS=1 \
+            LLVM_IAS=1
             
 - name: Package Kernel via AnyKernel3 Framework
         run: |
