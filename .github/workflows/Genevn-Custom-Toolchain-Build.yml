@@ -63,7 +63,6 @@ jobs:
           export SUBARCH=arm64
           make O=out defconfig
           
-          # Compile with enforced LZ4 compression
           make -j$(nproc --all) O=out \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
@@ -77,14 +76,12 @@ jobs:
           cd $GITHUB_WORKSPACE
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git AnyKernel
           
-          # Copy binary
           if [ -f "kernel-source/out/arch/arm64/boot/Image.lz4" ]; then
             cp kernel-source/out/arch/arm64/boot/Image.lz4 AnyKernel/Image
           else
             cp kernel-source/out/arch/arm64/boot/Image AnyKernel/Image
           fi
           
-          # Replace script with custom logic
           cd AnyKernel
           rm anykernel.sh
           cat <<'EOF' > anykernel.sh
@@ -92,6 +89,7 @@ jobs:
 ## osm0sis @ xda-developers
 
 ### AnyKernel setup
+# global properties
 properties() { '
 kernel.string=Genevn Next Kernel by Slm015
 do.devicecheck=1
@@ -145,7 +143,6 @@ dump_boot;
 write_boot;
 ## end init_boot install
 EOF
-
           chmod +x anykernel.sh
           zip -r9 ../Genevn-KernelSU-Next-Flashable.zip *
 
