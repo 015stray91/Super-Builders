@@ -70,8 +70,7 @@ jobs:
             LLVM=1 \
             LLVM_IAS=1 \
             CONFIG_KERNEL_LZ4=y
-
-      - name: Package Kernel via AnyKernel3 Framework
+- name: Package Kernel via AnyKernel3 Framework
         run: |
           cd $GITHUB_WORKSPACE
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git AnyKernel
@@ -84,28 +83,30 @@ jobs:
           
           cd AnyKernel
           rm anykernel.sh
-          cat <<'EOF' > anykernel.sh
+          # Use cat with a non-quoted delimiter to allow cleaner handling, 
+          # but carefully escape the interior content if necessary.
+          cat << 'END_SCRIPT' > anykernel.sh
 ### AnyKernel3 Ramdisk Mod Script
 ## osm0sis @ xda-developers
 
 ### AnyKernel setup
 # global properties
-properties() { '
-kernel.string=Genevn Next Kernel by Slm015
-do.devicecheck=1
-do.modules=0
-do.systemless=1
-do.cleanup=1
-do.cleanuponabort=0
-device.name1=genevn
-device.name2=genevn_g
-device.name3=
-device.name4=
-device.name5=
-supported.versions=
-supported.patchlevels=
-supported.vendorpatchlevels=
-'; } # end properties
+properties() {
+  kernel.string=Genevn Next Kernel by Slm015
+  do.devicecheck=1
+  do.modules=0
+  do.systemless=1
+  do.cleanup=1
+  do.cleanuponabort=0
+  device.name1=genevn
+  device.name2=genevn_g
+  device.name3=
+  device.name4=
+  device.name5=
+  supported.versions=
+  supported.patchlevels=
+  supported.vendorpatchlevels=
+} # end properties
 
 ### AnyKernel install
 
@@ -125,8 +126,8 @@ flash_boot;
 
 ## init_boot files attributes
 init_boot_attributes() {
-set_perm_recursive 0 0 755 644 $RAMDISK/*;
-set_perm_recursive 0 0 750 750 $RAMDISK/init* $RAMDISK/sbin;
+  set_perm_recursive 0 0 755 644 $RAMDISK/*;
+  set_perm_recursive 0 0 750 750 $RAMDISK/init* $RAMDISK/sbin;
 } # end attributes
 
 # init_boot shell variables
@@ -142,12 +143,8 @@ reset_ak;
 dump_boot;
 write_boot;
 ## end init_boot install
-EOF
+END_SCRIPT
+
           chmod +x anykernel.sh
           zip -r9 ../Genevn-KernelSU-Next-Flashable.zip *
-
-      - name: Push Flashable ZIP to GitHub Artifacts Storage
-        uses: actions/upload-artifact@v4
-        with:
-          name: AnyKernel3.zip
-          path: Genevn-KernelSU-Next-Flashable.zip
+ 
