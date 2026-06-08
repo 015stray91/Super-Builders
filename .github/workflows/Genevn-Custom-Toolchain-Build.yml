@@ -49,7 +49,7 @@ on:
       add_kpm:
         description: "Add KPM (SukiSU/ReSukiSU)"
         type: boolean
-        default: false
+        default: true
       sukisu_commit:
         description: "KSU commit override (empty = latest)"
         type: string
