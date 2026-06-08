@@ -72,8 +72,7 @@ jobs:
             CC=clang \
             LLVM=1 \
             LLVM_IAS=1
-            
-- name: Package Kernel via AnyKernel3 Framework
+            - name: Package Kernel via AnyKernel3 Framework
         run: |
           cd $GITHUB_WORKSPACE
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git AnyKernel
