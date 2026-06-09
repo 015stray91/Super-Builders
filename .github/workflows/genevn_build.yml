@@ -1,18 +1,8 @@
 name: Genevn Custom Toolchain Build
 
-permissions:
-  contents: write
-  actions: write
-
 on:
   workflow_dispatch:
     inputs:
-      kernel_target:
-        description: "Kernel target"
-        type: choice
-        default: "android12-5.10.209 (2024-05)"
-        options:
-          - "android12-5.10.209 (2024-05)"
       ksu_variant:
         description: "KernelSU variant"
         type: choice
@@ -22,10 +12,6 @@ on:
           - ReSukiSU
           - WKSU
         default: "KernelSU-Next"
-      add_susfs:
-        description: "Add SUSFS"
-        type: boolean
-        default: true
 
 jobs:
   build:
@@ -33,17 +19,8 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Parse Target Details
-        id: parse
-        run: echo "codename=Genevn" >> "$GITHUB_OUTPUT"
-
-      - name: Free Disk Space
-        uses: endersonmenezes/free-disk-space@v3
-        with:
-          remove_android: true
-          remove_tool_cache: true
-
-      - uses: actions/checkout@v5
+      - name: Checkout Repository
+        uses: actions/checkout@v5
 
       - name: Initialize Toolchain Environment
         run: |
@@ -51,9 +28,6 @@ jobs:
           sudo apt-get install -y clang lld llvm gcc-aarch64-linux-gnu binutils bc bison flex libssl-dev libelf-dev cpio kmod python3
 
       - name: Compile Genevn Kernel
-        env:
-          KSU_VARIANT: ${{ inputs.ksu_variant }}
-          CODENAME: ${{ steps.parse.outputs.codename }}
         run: |
           git clone --depth=1 https://github.com/015stray91/kernel-msm-1.git kernel-source
           cd kernel-source
@@ -71,21 +45,32 @@ jobs:
             LLVM=1 \
             LLVM_IAS=1
 
-      - name: Package Kernel via Repo Assets
+      - name: Package and Verify Artifacts
         run: |
-          # Copy the compiled kernel image into your tracked /anykernel folder
+          # Verify the output exists from the compiler
           if [ -f "kernel-source/out/arch/arm64/boot/Image.lz4" ]; then
             cp kernel-source/out/arch/arm64/boot/Image.lz4 anykernel/Image
-          else
+          elif [ -f "kernel-source/out/arch/arm64/boot/Image" ]; then
             cp kernel-source/out/arch/arm64/boot/Image anykernel/Image
+          else
+            echo "Error: Kernel image not found in kernel-source/out/arch/arm64/boot/"
+            exit 1
           fi
           
-          # Compress the directory into the final flashable zip
+          # Compress the local 'anykernel' directory
           cd anykernel
           zip -r9 ../Genevn-KernelSU-Next-Flashable.zip *
+          
+          # Verify ZIP creation
+          if [ -f "../Genevn-KernelSU-Next-Flashable.zip" ]; then
+            echo "Successfully packaged to Genevn-KernelSU-Next-Flashable.zip"
+          else
+            echo "Error: Packaging failed"
+            exit 1
+          fi
 
       - name: Upload Flashable ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: AnyKernel3-Flashable
+          name: Genevn-Kernel-Build
           path: Genevn-KernelSU-Next-Flashable.zip
