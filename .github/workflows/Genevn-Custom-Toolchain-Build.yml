@@ -61,26 +61,31 @@ jobs:
           
           export ARCH=arm64
           export SUBARCH=arm64
-          make O=out defconfig
-          
-          # We define the config as an environment variable for the make process
-          # instead of trying to chain it with a backslash
           export CONFIG_KERNEL_LZ4=y
+          
+          make O=out defconfig
           make -j$(nproc --all) O=out \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
             CC=clang \
             LLVM=1 \
             LLVM_IAS=1
-           - name: Package Kernel via Repo Assets
+
+      - name: Package Kernel via Repo Assets
         run: |
-          # Copy the binary into the root of your AnyKernel folder
+          # Copy the compiled kernel image into your tracked /anykernel folder
           if [ -f "kernel-source/out/arch/arm64/boot/Image.lz4" ]; then
-            cp kernel-source/out/arch/arm64/boot/Image.lz4 anykernel/Image.lz4
+            cp kernel-source/out/arch/arm64/boot/Image.lz4 anykernel/Image
           else
             cp kernel-source/out/arch/arm64/boot/Image anykernel/Image
           fi
           
-          # Compress the directory into the flashable zip
+          # Compress the directory into the final flashable zip
           cd anykernel
           zip -r9 ../Genevn-KernelSU-Next-Flashable.zip *
+
+      - name: Upload Flashable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: AnyKernel3-Flashable
+          path: Genevn-KernelSU-Next-Flashable.zip
