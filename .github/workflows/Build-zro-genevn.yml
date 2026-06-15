@@ -117,7 +117,7 @@ jobs:
           # 1. Custom Git initialization to handle Branch and Tag fetching sequentially
           git init kernel-source
           cd kernel-source
-          git remote add origin "https://github.com"
+          git remote add origin "git@github.com:015stray91/kernel-msm-1.git"
           
           echo "Pulling working branch: ${KERNEL_BRANCH}..."
           git fetch --depth=1 origin ${KERNEL_BRANCH}
