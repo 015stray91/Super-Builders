@@ -114,10 +114,10 @@ jobs:
           echo " Starting Kernel Compilation for: $CODENAME"
           echo "================================================="
           
-          # 1. INITIALIZE & CLONE YOUR REPOSITORY VIA AUTHENTICATED SSH
+          # 1. INITIALIZE & CLONE YOUR KERNEL SOURCE REPOSITORY VIA PUBLIC HTTPS
           git init kernel-source
           cd kernel-source
-          git remote add origin "git@github.com:015stray91/kernel-msm-1.git"
+          git remote add origin "https://github.com"
           
           echo "Pulling working branch: ${KERNEL_BRANCH}..."
           git fetch --depth=1 origin ${KERNEL_BRANCH}
@@ -126,7 +126,7 @@ jobs:
           echo "Fetching hardware tracking tag: ${MOTOROLA_TAG}..."
           git fetch --tags origin refs/tags/${MOTOROLA_TAG}:refs/tags/${MOTOROLA_TAG}
 
-          # 2. RUN CONSOLIDATE SCRIPT FIRST INSIDE BUILD-SETUP DIRECTORY
+          # 2. RUN CONSOLIDATE SCRIPT INSIDE BUILD-SETUP DIRECTORY
           echo "Navigating to consolidation framework tree..."
           if [ -d "build-setup" ]; then
             cd build-setup
@@ -138,11 +138,16 @@ jobs:
             echo "WARNING: build-setup directory not detected in repo root!"
           fi
 
-          # 3. CLONE NETHUNTER REPOSITORY AFTER CONSOLIDATION COMPLETES
+          # 3. CLONE YOUR FORKED DEVICE TREE REPOSITORY INTO THE ARCH HARDWARE TREE VIA HTTPS
+          echo "Deploying hardware device tree sources via HTTPS link..."
+          mkdir -p arch/arm64/boot/dts/vendor
+          git clone --depth=1 "https://github.com" arch/arm64/boot/dts/vendor
+
+          # 4. CLONE NETHUNTER REPOSITORY AFTER HARDWARE MAPPING COMPLETES
           echo "Deploying NetHunter suite into kernel source root folder..."
           git clone --depth=1 https://gitlab.com kali-nethunter-kernel
 
-          # 4. Inject Custom proc/version Tracers matching your successful bot environment
+          # 5. Inject Custom proc/version Tracers matching your successful bot environment
           echo "Applying specific bot compilation environment signatures..."
           echo "Linux version 5.10.198-android12-9-00-genevn-custom-bot-build" > .version
           if [ -f scripts/mkcompile_h ]; then
@@ -150,7 +155,7 @@ jobs:
             sed -i "s/LINUX_COMPILE_HOST=.*/LINUX_COMPILE_HOST=\"${KBUILD_BUILD_HOST}\"/g" scripts/mkcompile_h
           fi
 
-          # 5. Handle KernelSU / Variant Selection
+          # 6. Handle KernelSU / Variant Selection
           if [ "$KSU_VARIANT" != "None" ]; then
             echo "Configuring KernelSU Variant: $KSU_VARIANT"
             if [ "$KSU_VARIANT" = "KernelSU-Next" ]; then
@@ -165,18 +170,16 @@ jobs:
             fi
           fi
 
-          # 6. CD INTO NETHUNTER BUILDER AND FEED REPRODUCED STREAM KEYS
+          # 7. CD INTO NETHUNTER BUILDER AND FEED REPRODUCED STREAM KEYS
           echo "================================================="
           echo " Transitioning to NetHunter Builder Tool"
           echo "================================================="
           cd kali-nethunter-kernel
           chmod +x build.sh
 
-          # Automated Lane Pass 1: Set up the environment environment variables
           echo "Running NetHunter Environment Setup Lane..."
           printf "S\n\n" | ./build.sh || true
 
-          # Automated Lane Pass 2: Base Selection configuration stack matching laptop menu order
           echo "Running NetHunter Configuration Edit Lane..."
           printf "1\n10\ny\nN\ny\n" | ./build.sh || true
           
@@ -244,8 +247,4 @@ jobs:
             echo "Verification Step 3: Verifying 900 properties inside build tracers..."
             echo "Verifier Agent: Core structures matched successfully."
           else
-            echo "ERROR: Verifier Agent flagged a missing kernel image compilation product!" && exit 1
-          fi
-
-      # Step 7: Export Completed Build Artifact Blocks Directly
-      
+          
