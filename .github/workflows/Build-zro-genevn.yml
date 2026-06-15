@@ -97,7 +97,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang lld llvm gcc-aarch64-linux-gnu binutils bc bison flex libssl-dev libelf-dev cpio kmod python3 lz4 liblz4-tool libncurses-dev rsync
 
-      # Step 5: Run the Genevn Custom Kernel Build Execution
+       # Step 5: Run the Genevn Custom Kernel Build Execution
       - name: Compile Genevn Kernel
         env:
           KSU_VARIANT: ${{ inputs.ksu_variant }}
@@ -114,7 +114,7 @@ jobs:
           echo " Starting Kernel Compilation for: $CODENAME"
           echo "================================================="
           
-          # 1. Custom Git initialization to handle Branch and Tag fetching sequentially
+          # 1. INITIALIZE & CLONE YOUR REPOSITORY FIRST via SSH Link
           git init kernel-source
           cd kernel-source
           git remote add origin "git@github.com:015stray91/kernel-msm-1.git"
@@ -126,7 +126,23 @@ jobs:
           echo "Fetching hardware tracking tag: ${MOTOROLA_TAG}..."
           git fetch --tags origin refs/tags/${MOTOROLA_TAG}:refs/tags/${MOTOROLA_TAG}
 
-          # 2. Inject Custom proc/version Tracers matching your successful bot environment
+          # 2. RUN CONSOLIDATE SCRIPT FIRST INSIDE BUILD-SETUP DIRECTORY
+          echo "Navigating to consolidation framework tree..."
+          if [ -d "build-setup" ]; then
+            cd build-setup
+            chmod +x build-kernel-consolidate.sh
+            echo "Running consolidation sequence script..."
+            ./build-kernel-consolidate.sh
+            cd ..
+          else
+            echo "WARNING: build-setup directory not detected in repo root!"
+          fi
+
+          # 3. CLONE NETHUNTER REPOSITORY AFTER CONSOLIDATION COMPLETES
+          echo "Deploying NetHunter suite into kernel source root folder..."
+          git clone --depth=1 https://gitlab.com kali-nethunter-kernel
+
+          # 4. Inject Custom proc/version Tracers matching your successful bot environment
           echo "Applying specific bot compilation environment signatures..."
           echo "Linux version 5.10.198-android12-9-00-genevn-custom-bot-build" > .version
           if [ -f scripts/mkcompile_h ]; then
@@ -134,7 +150,7 @@ jobs:
             sed -i "s/LINUX_COMPILE_HOST=.*/LINUX_COMPILE_HOST=\"${KBUILD_BUILD_HOST}\"/g" scripts/mkcompile_h
           fi
 
-          # 3. Handle KernelSU / Variant Selection
+          # 5. Handle KernelSU / Variant Selection
           if [ "$KSU_VARIANT" != "None" ]; then
             echo "Configuring KernelSU Variant: $KSU_VARIANT"
             if [ "$KSU_VARIANT" = "KernelSU-Next" ]; then
@@ -149,38 +165,40 @@ jobs:
             fi
           fi
 
-          # 4. Provision and Configure NetHunter Kernel Builder Repository Infrastructure
-          echo "Cloning NetHunter Kernel Builder Toolchain Suite..."
-          cd ..
-          git clone --depth=1 https://gitlab.com nethunter-builder
-          cd kernel-source
+          # 6. CD INTO NETHUNTER BUILDER AND FEED REPRODUCED STREAM KEYS
+          echo "================================================="
+          echo " Transitioning to NetHunter Builder Tool"
+          echo "================================================="
+          cd kali-nethunter-kernel
+          chmod +x build.sh
 
-          # 5. Conditional Feature Patches
-          if [ "$ADD_SUSFS" = "true" ]; then echo "Applying SUSFS patches..."; fi
-          if [ "$ADD_ZEROMOUNT" = "true" ]; then echo "Enabling ZeroMount..."; fi
-          if [ "$ADD_ZRAM" = "true" ]; then echo "Configuring ZRAM with LZ4K..."; fi
-          if [ "$ADD_BBG" = "true" ]; then echo "Enabling Baseband Guard..."; fi
+          # Automated Lane Pass 1: Set up the environment environment variables
+          echo "Running NetHunter Environment Setup Lane..."
+          printf "S\n\n" | ./build.sh || true
+
+          # Automated Lane Pass 2: Base Selection configuration stack matching laptop menu order
+          echo "Running NetHunter Configuration Edit Lane..."
+          # Sequence: 1 -> Option 10 -> yes to replace -> No to edit -> yes to save
+          printf "1\n10\ny\nN\ny\n" | ./build.sh || true
+          
+          cd ..
 
           echo "================================================="
-          echo " Merging Configuration Fragment Layers (Bottom-to-Top)"
+          echo " Running Final Custom Stacking and Defconfig Compiling"
           echo "================================================="
           export ARCH=arm64
           export SUBARCH=arm64
           
-          # Source root level configurations matching build.config scripts
-          if [ -f build.config.msm.parrot ]; then
-            echo "Processing root-level variables from build.config.msm.parrot..."
-            # Simulates build script sourcing configurations natively
-          fi
-
-          # Build and layer configs using the kernel's native merge_config tool
+          # Layer base defconfig
+          make O=out gki_defconfig
+          
           echo "Running native scripts/kconfig/merge_config.sh pipeline..."
           ARCH=arm64 scripts/kconfig/merge_config.sh -O out \
             arch/arm64/configs/gki_defconfig \
             arch/arm64/configs/vendor/ext_config/moto-parrot-gki.config \
             arch/arm64/configs/vendor/ext_config/moto-parrot-genevn.config
 
-          # Inline performance parameter overrides (Appended directly to the active merged tree)
+          # Inline performance overrides forced after NetHunter configurations finish
           cat <<EOF >> out/.config
           CONFIG_INITRAMFS_SOURCE=""
           CONFIG_RD_GZIP=y
@@ -197,13 +215,12 @@ jobs:
             echo "CONFIG_OVERLAY_FS=y" >> out/.config
           fi
 
-          # Resolve dependencies and structural logic
+          # Finalize config stack boundaries
           make O=out olddefconfig
 
           echo "================================================="
           echo " Launching Toolchain Compiler"
           echo "================================================="
-          # Execute compiler using available runner cores
           make -j$(nproc --all) O=out \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
@@ -217,11 +234,7 @@ jobs:
             mkdir -p out/arch/arm64/boot/dist
             python3 tools/libufdt/utils/src/mkdtboimg.py create out/arch/arm64/boot/dtbo.img --page_size=4096 $(find out/arch/arm64/boot/dts/ -name "*.dtbo")
           fi
-            
-          echo "================================================="
-          echo " Compilation Completed Successfully"
-          echo "================================================="
-
+          
       # Step 6: Verifier Agent Verification Layer Execution
       - name: Execute Verifier Agent Validation Loop
         run: |
