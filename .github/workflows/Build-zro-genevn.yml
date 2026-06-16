@@ -123,21 +123,22 @@ jobs:
           TARGET_MSM="/015stray91/kernel-msm-1.git"
           TARGET_DT="/015stray91/kernel-devicetree.git"
           
-          # FIXED: BRANCH NAME SEQUENCE MAPPED EXACTLY TO YOUR CODEBASE
+          # TARGET WORKING BRANCH AND TARGET REFERENCE PINNED TAGS
           MY_REPO_BRANCH="android-14-release-u1tgns34.42-86-2-32"
           MY_REPO_TAG="MMI-U1TGNS34.42-86-3-16"
           
-          # 1. INITIALIZE & CLONE YOUR KERNEL SOURCE REPOSITORY VIA SYSTEM VARIABLE
+          # 1. INITIALIZE WORKSPACE AND FETCH THE EXPLICIT TARGET BRANCH
           git init kernel-source
           cd kernel-source
           git remote add origin "${BASE_HTTP}${TARGET_MSM}"
           
-          echo "Pulling explicit branch from your personal repo: ${MY_REPO_BRANCH}..."
+          echo "Pulling explicit mainstream branch: ${MY_REPO_BRANCH}..."
           git fetch --depth=1 origin "${MY_REPO_BRANCH}"
           git checkout FETCH_HEAD
           
-          echo "Fetching tag tracking rules from your personal repo: ${MY_REPO_TAG}..."
-          git fetch --tags origin +refs/tags/*:refs/tags/*
+          # Isolates the exact hardware tracking refspec layout to block the tag flood
+          echo "Targeting specific repository tracking tag reference: ${MY_REPO_TAG}..."
+          git fetch --depth=1 origin refs/tags/${MY_REPO_TAG}:refs/tags/${MY_REPO_TAG}
 
           # 2. CLONE YOUR FORKED DEVICE TREE REPOSITORY INTO THE ARCH HARDWARE TREE VIA SYSTEM VARIABLE
           echo "Deploying hardware device tree sources via HTTPS link..."
@@ -227,6 +228,4 @@ jobs:
             echo "Verification Step 1: Kernel binaries validated successfully."
             echo "Verification Step 2: Checking module alignment against modules.list.msm.parrot..."
             echo "Verification Step 3: Verifying custom configuration options inside build tracers..."
-            echo "Verifier Agent: Hardware profile and custom parameters verified successfully."
-          else
-          
+            
