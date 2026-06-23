@@ -1,11 +1,11 @@
 name: Uncensored Factory Baseline Tracer
 
 on:
-  workflow_dispatch: # Allows you to trigger this instantly from your dashboard
+  workflow_dispatch: # Allows you to trigger this instantly from your GitHub actions dashboard
 
 jobs:
   build-baseline:
-    runs-on: ubuntu-latest # Bypasses your laptop's 4GB RAM limits completely
+    runs-on: ubuntu-latest # High-performance cloud engine bypasses local RAM limitations
     
     steps:
       - name: Check Out Orchestrator Core
@@ -18,7 +18,7 @@ jobs:
           branch: 'android14-release-u1tgns34.42-86-2-32' # Forces exact stock tag
           path: 'kernel-msm-1'
 
-      - name: Initialize Hijack Engine & Run Trace
+      - name: Initialize Hijack Engine & Filter Trace
         run: |
           cd kernel-msm-1
           export ARCH=arm64
@@ -28,12 +28,23 @@ jobs:
           export CLANG_PREBUILT_BIN="prebuilts/clang/host/linux-x86/clang-r416183b/bin"
           export PATH="${PWD}/${CLANG_PREBUILT_BIN}:${PWD}/prebuilts/build-tools/path/linux-x86:${PATH}"
           
-          # Fire the verbose compiler bot, bypassing verification fallback routines
-          bash -x build/build.sh BUILD_CONFIG=common/build.config.gki.aarch64 2>&1 | tee factory_mind_read.log
+          echo "=================================================================" > target_decision_map.txt
+          echo "       FILTERED COMPILER BOT DECISION DESTRUCT BLUEPRINT        " >> target_decision_map.txt
+          echo "=================================================================" >> target_decision_map.txt
+          echo "Target Build Tag: MMI-U1TGNS34.42-86-2-32" >> target_decision_map.txt
+          echo "Capture Timestamp: $(date)" >> target_decision_map.txt
+          echo "-----------------------------------------------------------------" >> target_decision_map.txt
+          
+          # Fire the build with verbose tracing, but filter the stream instantly.
+          # This strips out millions of lines of raw C compilation code and captures
+          # ONLY the files being sourced, repositories called, and default configuration overrides.
+          bash -x build/build.sh BUILD_CONFIG=common/build.config.gki.aarch64 2>&1 \
 
-      - name: Upload Brain-Dump Decisional Blueprint
+            | grep -E "\+ source|\+ \.|ext_config|kernel-devicetree|olddefconfig|defconfig|default|override" \
+            >> target_decision_map.txt || true
+
+      - name: Upload Clean Decisional Blueprint
         uses: actions/upload-artifact@v4
         with:
-          name: compiler_decision_roadmap
-          path: kernel-msm-1/factory_mind_read.log
-
+          name: compiler_filtered_roadmap
+          path: kernel-msm-1/target_decision_map.txt
