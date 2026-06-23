@@ -1,0 +1,39 @@
+name: Uncensored Factory Baseline Tracer
+
+on:
+  workflow_dispatch: # Allows you to trigger this instantly from your dashboard
+
+jobs:
+  build-baseline:
+    runs-on: ubuntu-latest # Bypasses your laptop's 4GB RAM limits completely
+    
+    steps:
+      - name: Check Out Orchestrator Core
+        uses: actions/checkout@v4
+
+      - name: Fetch Pure Kernel Source Tree
+        uses: actions/checkout@v4
+        with:
+          repository: '015stray91/kernel-msm-1' # Pulls your raw source array
+          branch: 'android14-release-u1tgns34.42-86-2-32' # Forces exact stock tag
+          path: 'kernel-msm-1'
+
+      - name: Initialize Hijack Engine & Run Trace
+        run: |
+          cd kernel-msm-1
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export OFF_TRACE_BUILD=0
+          export LZ4_RAMDISK=1
+          export CLANG_PREBUILT_BIN="prebuilts/clang/host/linux-x86/clang-r416183b/bin"
+          export PATH="${PWD}/${CLANG_PREBUILT_BIN}:${PWD}/prebuilts/build-tools/path/linux-x86:${PATH}"
+          
+          # Fire the verbose compiler bot, bypassing verification fallback routines
+          bash -x build/build.sh BUILD_CONFIG=common/build.config.gki.aarch64 2>&1 | tee factory_mind_read.log
+
+      - name: Upload Brain-Dump Decisional Blueprint
+        uses: actions/upload-artifact@v4
+        with:
+          name: compiler_decision_roadmap
+          path: kernel-msm-1/factory_mind_read.log
+
