@@ -1,10 +1,92 @@
-# Step 4: Environment Build Test Setup
+name: Genevn Custom Toolchain Build
+
+permissions:
+  contents: write
+  actions: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_target:
+        description: "Kernel target"
+        type: choice
+        default: "android12-5.10.218 (2024-05)"
+        options:
+          - "android12-5.10.218 (2024-05)"
+      quick_target:
+        description: "Quick select"
+        type: string
+        default: ""
+      ksu_variant:
+        description: "KernelSU variant"
+        type: choice
+        options:
+          - KernelSU-Next
+          - SukiSU
+          - ReSukiSU
+          - WKSU
+        default: "KernelSU-Next"
+      add_susfs:
+        description: "Add SUSFS"
+        type: boolean
+        default: true
+      add_zeromount:
+        description: "Add ZeroMount"
+        type: boolean
+        default: true
+      add_zram:
+        description: "Add ZRAM with LZ4K"
+        type: boolean
+        default: true
+      add_bbg:
+        description: "Add Baseband Guard"
+        type: boolean
+        default: true
+      add_overlayfs_support:
+        description: "Add overlayfs support"
+        type: boolean
+        default: true
+      add_kpm:
+        description: "Add KPM"
+        type: boolean
+        default: true
+      sukisu_commit:
+        description: "KSU commit override"
+        type: string
+        default: ""
+
+jobs:
+  build:
+    name: "Build Custom Kernel - Genevn"
+    runs-on: ubuntu-22.04
+    
+    steps:
+      - name: Parse Target Details
+        id: parse
+        run: |
+          echo "android_version=android12" >> "$GITHUB_OUTPUT"
+          echo "kernel_version=5.10" >> "$GITHUB_OUTPUT"
+          echo "sub_level=218" >> "$GITHUB_OUTPUT"
+          echo "os_patch_level=2024-05" >> "$GITHUB_OUTPUT"
+          echo "codename=Genevn" >> "$GITHUB_OUTPUT"
+
+      - name: Free Disk Space
+        uses: endersonmenezes/free-disk-space@v3
+        with:
+          remove_android: true
+          remove_tool_cache: true
+
+      - name: Checkout Repository
+        uses: actions/checkout@v5
+        with:
+          sparse-checkout: device-profiles.json
+          sparse-checkout-cone-mode: true
+
       - name: Initialize Toolchain Environment
         run: |
           sudo apt-get update
           sudo apt-get install -y clang lld llvm gcc-aarch64-linux-gnu binutils bc bison flex libssl-dev libelf-dev cpio kmod python3 libncurses-dev libtinfo-dev
 
-      # Step 5: Run the Genevn Custom Kernel Build Execution
       - name: Compile Genevn Kernel
         env:
           KSU_VARIANT: ${{ inputs.ksu_variant }}
@@ -18,23 +100,29 @@
           CODENAME: ${{ steps.parse.outputs.codename }}
         run: |
           echo "Starting Kernel Compilation for: $CODENAME"
-          # Clone your personal kernel repository
           git clone --depth=1 https://github.com/015stray91/kernel-msm-1.git kernel-source
           cd kernel-source
-          
-          # Merge ACK (Android Common Kernel)
           git remote add ack https://android.googlesource.com/kernel/common
           git fetch ack android12-5.10
           git merge ack/android12-5.10 --no-ff --no-commit -Xours
-          
-          # Setup KernelSU
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
-          
-          # Build environment
           export ARCH=arm64
           export SUBARCH=arm64
           make O=out msm_defconfig
-          make -j$(nproc --all) O=out \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
-            CC=clang LLVM=1 LLVM_IAS=1
+          make -j$(nproc --all) O=out CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- CC=clang LLVM=1 LLVM_IAS=1
+
+      - name: Package Boot Image
+        run: |
+          mkdir -p output
+          python3 kernel-source/package/asop-tools/repack_bootimg.py \
+            --kernel "kernel-source/out/arch/arm64/boot/Image.gz-" \
+            --ramdisk "kernel-source/package/asop-tools/mkbootimg/boot/ramdisk" \
+            --base 0x80000000 \
+            --pagesize 4096 \
+            --output "output/Genevn-KernelSU-${{ inputs.ksu_variant }}-boot.img"
+
+      - name: Upload boot.img
+        uses: actions/upload-artifact@v4
+        with:
+          name: Genevn-Kernel-${{ inputs.ksu_variant }}
+          path: output/
