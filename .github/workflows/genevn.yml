@@ -1,74 +1,53 @@
-name: Genevn Custom Kernel Build
-
-permissions:
-  contents: write
-  actions: write
+name: Build Custom Kernel - Genevn
 
 on:
-  workflow_dispatch:
-    inputs:
-      ksu_variant:
-        description: "KernelSU variant"
-        type: choice
-        options: [KernelSU-Next, SukiSU, ReSukiSU, WKSU]
-        default: "KernelSU-Next"
+  push:
+    branches: [ main ]
 
 jobs:
   build:
-    name: "Build Custom Kernel - Genevn"
-    runs-on: ubuntu-22.04
-    
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v5
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-      - name: Initialize Toolchain and Merge Configs
+      - name: Initialize Full Build Environment
         run: |
+          # Install the complete suite of build tools and libraries
           sudo apt-get update
-          sudo apt-get install -y clang lld llvm gcc-aarch64-linux-gnu binutils bc bison flex libssl-dev libelf-dev cpio kmod python3 libncurses-dev libtinfo-dev
+          sudo apt-get install -y \
+            build-essential libncurses5-dev libncursesw5-dev \
+            libqt5core5a libqt5gui5 libqt5widgets5 qtbase5-dev \
+            clang lld llvm gcc-aarch64-linux-gnu binutils bc bison flex \
+            libssl-dev libelf-dev cpio kmod python3
           
+          # Clone the repository
           git clone --depth=1 https://github.com/015stray91/kernel-msm-1.git kernel-source
+          
+          # Navigate into the kernel directory
           cd kernel-source
           
-          # Root level and Vendor configuration merge sequence
-          # 1. Base GKI
-          # 2. Root level build configs
-          # 3. Vendor fragments (KSU & Modules)
-          # 4. Final Device Extension Override (Moto-Parrot-Genevn)
+          # Force a clean state to prevent 'make' from looking at parent directories
+          make mrproper
+          
+          # Ensure output directory exists locally
+          mkdir -p out
+          
+          # Merge configurations
           ./scripts/kconfig/merge_config.sh -m \
             arch/arm64/configs/gki_defconfig \
             build.config.msm.parrot \
+            arch/arm64/configs/vendor/consolidate_fragment \
             arch/arm64/configs/vendor/ext_config/moto-parrot-genevn.config
             
-          # Apply the merged config
-          make O=out msm_defconfig
+          # Copy the merged config to the out directory to satisfy the build system
+          cp .config out/
+          
+          # Finalize config using the local directory
+          make ARCH=arm64 O=out msm_defconfig
 
-      - name: Compile Genevn Kernel
+      - name: Build Kernel
         run: |
           cd kernel-source
-          # KernelSU setup
-          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
-          
-          # Build process using optimized parallel jobs
-          export ARCH=arm64
-          export SUBARCH=arm64
-          make -j$(nproc --all) O=out \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
-            CC=clang LLVM=1 LLVM_IAS=1
-
-      - name: Package Boot Image
-        run: |
-          mkdir -p output
-          python3 kernel-source/package/asop-tools/repack_bootimg.py \
-            --kernel "kernel-source/out/arch/arm64/boot/Image.gz-" \
-            --ramdisk "kernel-source/package/asop-tools/mkbootimg/boot/ramdisk" \
-            --base 0x80000000 \
-            --pagesize 4096 \
-            --output "output/Genevn-KernelSU-${{ inputs.ksu_variant }}-boot.img"
-
-      - name: Upload boot.img
-        uses: actions/upload-artifact@v4
-        with:
-          name: Genevn-Kernel-${{ inputs.ksu_variant }}
-          path: output/
+          # Use all available CPU cores for the build
+          make -j$(nproc) ARCH=arm64 O=out
