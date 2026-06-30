@@ -27,15 +27,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang lld llvm gcc-aarch64-linux-gnu binutils bc bison flex libssl-dev libelf-dev cpio kmod python3 libncurses-dev libtinfo-dev
           
-          # Clone your kernel source
           git clone --depth=1 https://github.com/015stray91/kernel-msm-1.git kernel-source
           cd kernel-source
           
-          # Run the merge script with the full fragment chain
-          # This establishes your device identity and KSU/Module requirements
+          # Root level and Vendor configuration merge sequence
+          # 1. Base GKI
+          # 2. Root level build configs
+          # 3. Vendor fragments (KSU & Modules)
+          # 4. Final Device Extension Override (Moto-Parrot-Genevn)
           ./scripts/kconfig/merge_config.sh -m \
             arch/arm64/configs/gki_defconfig \
-            arch/arm64/configs/vendor/build.config.msm.parrot \
+            build.config.msm.parrot \
             arch/arm64/configs/vendor/consolidate_fragment.config \
             arch/arm64/configs/vendor/ext_config/moto-parrot-genevn.config
             
@@ -45,10 +47,10 @@ jobs:
       - name: Compile Genevn Kernel
         run: |
           cd kernel-source
-          # Setup KernelSU
+          # KernelSU setup
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
           
-          # Build
+          # Build process using optimized parallel jobs
           export ARCH=arm64
           export SUBARCH=arm64
           make -j$(nproc --all) O=out \
