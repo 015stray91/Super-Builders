@@ -38,7 +38,6 @@ jobs:
           ./scripts/kconfig/merge_config.sh -m \
             arch/arm64/configs/gki_defconfig \
             build.config.msm.parrot \
-            arch/arm64/configs/vendor/consolidate.fragment \
             arch/arm64/configs/vendor/ext_config/moto-parrot-genevn.config
             
           # Apply the merged config
