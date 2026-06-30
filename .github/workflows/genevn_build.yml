@@ -1,4 +1,4 @@
-name: Genevn Custom Toolchain Build - Full Mods
+name: Genevn Complete Build
 
 on:
   workflow_dispatch:
@@ -15,20 +15,21 @@ on:
 
 jobs:
   build:
-    name: "Build Custom Kernel - Genevn"
+    name: "Complete Genevn Build"
     runs-on: ubuntu-22.04
     container: ghcr.io/lineageos4microg/android-kernel-build:latest
 
     steps:
-      - name: Checkout Repository
+      # ===== SETUP =====
+      - name: Checkout Super-Builders
         uses: actions/checkout@v4
 
-      - name: Clone kernel source
+      - name: Clone kernel-msm-1
         run: |
-          git clone --depth=1 https://github.com/015STRAY091/kernel-msm-1.git kernel-source
+          git clone --depth=1 https://github.com/015stray91/kernel-msm-1.git kernel-source
           cd kernel-source
 
-      # ===== PATCHING SECTION =====
+      # ===== PATCHING =====
       - name: Apply KernelSU variant
         working-directory: kernel-source
         run: |
@@ -39,31 +40,22 @@ jobs:
               git am <(curl -sL https://raw.githubusercontent.com/tiann/KernelSU/next/patches/kernelsu.patch) || true
               git checkout kernelsu/next -- drivers/kernelsu/ include/kernelsu/
               ;;
-            "SukiSU")
-              curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s suki
-              ;;
-            "ReSukiSU")
-              curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s resuki
-              ;;
-            "WKSU")
-              curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s wksu
+            *)
+              curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s "${{ inputs.ksu_variant | lower }}"
               ;;
           esac
 
       - name: Apply SUFS + ZeroMount + KPM
         working-directory: kernel-source
         run: |
-          # SUFS
           git remote add sufs https://github.com/tiann/SUFS
           git fetch sufs main
           git am <(curl -sL https://raw.githubusercontent.com/tiann/SUFS/main/patch/kernel.patch) || true
 
-          # ZeroMount
           git remote add zeromount https://github.com/HuskyDG/ZeroMount
           git fetch zeromount main
           git am <(curl -sL https://raw.githubusercontent.com/HuskyDG/ZeroMount/main/patch/kernel.patch) || true
 
-          # KPM (from KernelSU Next)
           git am <(curl -sL https://raw.githubusercontent.com/tiann/KernelSU/next/patches/kpm.patch) || true
 
       # ===== ACK MERGE =====
@@ -73,11 +65,11 @@ jobs:
           git remote add ack https://android.googlesource.com/kernel/common
           git fetch ack android12-5.10
           git merge ack/android12-5.10 --no-ff --no-commit -Xours
-          git checkout --ours drivers/kernelsu/ drivers/gpu/msm/ drivers/platform/msm/ fs/sufs/ fs/zeromount/
-          git commit -m "ACK merge + mods"
+          git checkout --ours drivers/kernelsu/ drivers/gpu/msm/ drivers/platform/msm/
+          git commit -m "ACK android12-5.10 + genevn + mods"
 
       # ===== CONFIG =====
-      - name: Apply genevn + mod configs
+      - name: Apply all configs
         working-directory: kernel-source
         run: |
           make ARCH=arm64 genevn_gki_defconfig
@@ -90,7 +82,6 @@ jobs:
           CONFIG_SUFS_ZSTD=y
           CONFIG_ZERO_MOUNT=y
           CONFIG_KPM=y
-          CONFIG_KERNEL_LZ4=y
           EOF
           scripts/kconfig/merge_config.sh full_mods.config
           make olddefconfig
@@ -99,26 +90,32 @@ jobs:
       - name: Build kernel
         working-directory: kernel-source
         run: |
-          export ARCH=arm64
-          export SUBARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
-
-          make -j$(nproc) O=out \
+          make -j$(nproc) ARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-gnu- \
             DTB:=msm/sdm435-genevn.dtb \
             Image.gz-dtb
 
-      # ===== PACKAGE =====
-      - name: Package with AnyKernel
+      # ===== PACKAGE WITH YOUR TOOLS =====
+      - name: Package boot.img
         run: |
-          mkdir -p anykernel
-          cp kernel-source/out/arch/arm64/boot/Image.gz-dtb anykernel/
-          cd anykernel
-          zip -r9 ../Genevn-KernelSU-${{ inputs.ksu_variant }}-Flashable.zip *
+          KERNEL="kernel-source/arch/arm64/boot/Image.gz-dtb"
+          RAMDISK="kernel-source/packages/ASOP-tools/mkbootimg/boot/ramdisk"
+          CMDLINE=$(cat kernel-source/packages/ASOP-tools/mkbootimg/boot/extract_your_boot_info)
+          OUT_DIR="final_output"
 
-      - name: Upload Flashable ZIP
+          mkdir -p "$OUT_DIR"
+
+          python3 kernel-source/packages/ASOP-tools/mkbootimg.py \
+            --kernel "$KERNEL" \
+            --ramdisk "$RAMDISK" \
+            --cmdline "$CMDLINE" \
+            --base 0x80000000 \
+            --pagesize 4096 \
+            --output "$OUT_DIR/Genevn-KernelSU-${{ inputs.ksu_variant }}-boot.img"
+
+      # ===== UPLOAD =====
+      - name: Upload boot.img
         uses: actions/upload-artifact@v4
         with:
           name: Genevn-Kernel-${{ inputs.ksu_variant }}
-          path: Genevn-KernelSU-${{ inputs.ksu_variant }}-Flashable.zip
+          path: final_output/
