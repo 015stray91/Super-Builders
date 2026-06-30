@@ -14,7 +14,7 @@ on:
         options:
           - "android12-5.10.218 (2024-05)"
       quick_target:
-        description: "Quick select — type e.g. android15-6.6.58 (overrides dropdown)"
+        description: "Quick select"
         type: string
         default: ""
       ksu_variant:
@@ -47,49 +47,42 @@ on:
         type: boolean
         default: true
       add_kpm:
-        description: "Add KPM (SukiSU/ReSukiSU)"
+        description: "Add KPM"
         type: boolean
         default: true
       sukisu_commit:
-        description: "KSU commit override (empty = latest)"
+        description: "KSU commit override"
         type: string
         default: ""
 
 jobs:
   build:
     name: "Build Custom Kernel - Genevn"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     
     steps:
-      # Step 1: Parse the user dropdown targets locally
       - name: Parse Target Details
         id: parse
         run: |
           echo "android_version=android12" >> "$GITHUB_OUTPUT"
           echo "kernel_version=5.10" >> "$GITHUB_OUTPUT"
-          echo "sub_level=209" >> "$GITHUB_OUTPUT"
+          echo "sub_level=218" >> "$GITHUB_OUTPUT"
           echo "os_patch_level=2024-05" >> "$GITHUB_OUTPUT"
           echo "codename=Genevn" >> "$GITHUB_OUTPUT"
-      # Step 2: Clean the environment disk space 
+
       - name: Free Disk Space
         uses: endersonmenezes/free-disk-space@v3
         with:
           remove_android: true
           remove_tool_cache: true
 
-      # Step 3: Checkout your repository configurations using Node 24 native action
       - uses: actions/checkout@v5
-        with:
-          sparse-checkout: device-profiles.json
-          sparse-checkout-cone-mode: true
 
-      # Step 4: Environment Build Test Setup
       - name: Initialize Toolchain Environment
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang lld llvm gcc-aarch64-linux-gnu binutils bc bison flex libssl-dev libelf-dev cpio kmod python3 
-     
-    # Step 5: Run the Genevn Custom Kernel Build Execution
+          sudo apt-get install -y clang lld llvm gcc-aarch64-linux-gnu binutils bc bison flex libssl-dev libelf-dev cpio kmod python3 libncurses-dev libtinfo-dev
+
       - name: Compile Genevn Kernel
         env:
           KSU_VARIANT: ${{ inputs.ksu_variant }}
@@ -102,107 +95,41 @@ jobs:
           SUKISU_COMMIT: ${{ inputs.sukisu_commit }}
           CODENAME: ${{ steps.parse.outputs.codename }}
         run: |
-          echo "================================================="
-          echo " Starting Kernel Compilation for: $CODENAME"
-          echo "================================================="
-          name: Merge ACK
-        working-directory: kernel-msm-1
-      # 1.git remote add ack https://android.googlesource.com/kernel/common
-          git fetch ack android12-5.10
-          git merge ack/android12-5.10 --no-ff --no-commit -Xours
-          git checkout --ours drivers/kernelsu/ drivers/gpu/msm/ drivers/platform/msm/
-          git commit -m "ACK + mods"
-          
-          # 2. Clone the MSM Kernel Source Tree
-          echo "Cloning Motorola MSM kernel repository..."
+          # 1. Clone Source
           git clone --depth=1 https://github.com/015stray91/kernel-msm-1.git kernel-source
           cd kernel-source
-          # 3. Handle KernelSU / Variant Selection
-          if [ "$KSU_VARIANT" != "None" ]; then
-            echo "Configuring KernelSU Variant: $KSU_VARIANT"
-            
-            # Determine correct repository based on selection
-            if [ "$KSU_VARIANT" = "KernelSU-Next" ]; then
-              KSU_REPO="https://github.com/tiann/KernelSU" # Replace with specific Next repo if needed
-            else
-              KSU_REPO="https://github.com/tiann/KernelSU.git"
-            fi
-            
-            # Run standard KSU integration setup
-            curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
-            
-            # Apply custom commit override if provided
-            if [ ! -z "$SUKISU_COMMIT" ]; then
-              echo "Overriding KSU to commit: $SUKISU_COMMIT"
-              cd KernelSU && git fetch origin && git checkout "$SUKISU_COMMIT" && cd ..
-            fi
-          fi
-          # 3. Conditional Feature Patches
-          if [ "$ADD_SUSFS" = "true" ]; then
-            echo "Applying SUSFS patches..."
-            # Clone SUSFS files/patches or integrate manually
-            # git clone https://gitlab.com/su-list/susfs4ksu.git
-            # cp susfs4ksu/kernel/* ./kernel/
-          fi
-          if [ "$ADD_ZEROMOUNT" = "true" ]; then
-            echo "Enabling ZeroMount..."
-            # Modify defconfig or include inline patch files
-            # sed -i 's/# CONFIG_ZEROMOUNT is not set/CONFIG_ZEROMOUNT=y/' arch/arm64/configs/msm_defconfig
-          fi
-          if [ "$ADD_ZRAM" = "true" ]; then
-            echo "Configuring ZRAM with LZ4K..."
-            echo "CONFIG_ZRAM=y" >> arch/arm64/configs/msm_defconfig
-            echo "CONFIG_ZCOMP_LZ4K=y" >> arch/arm64/configs/msm_defconfig
-          fi
-          if [ "$ADD_BBG" = "true" ]; then
-            echo "Enabling Baseband Guard..."
-            # Append configuration details or trigger target patch scripts
-          fi
-          if [ "$ADD_OVERLAYFS" = "true" ]; then
-            echo "Enabling overlayfs support..."
-            echo "CONFIG_OVERLAY_FS=y" >> arch/arm64/configs/msm_defconfig
-          fi
-          echo "================================================="
-          echo " Launching Toolchain Compiler"
-          echo "================================================="
           
-          # Setup compilation environment paths
+          # 2. Merge ACK
+          git remote add ack https://android.googlesource.com/kernel/common
+          git fetch ack android12-5.10
+          git merge ack/android12-5.10 --no-ff --no-commit -Xours
+          
+          # 3. KSU Setup
+          if [ "$KSU_VARIANT" != "None" ]; then
+            curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
+            if [ ! -z "$SUKISU_COMMIT" ]; then
+              cd KernelSU && git checkout "$SUKISU_COMMIT" && cd ..
+            fi
+          fi
+          
+          # 4. Apply Features (defconfig patching)
+          [ "$ADD_ZRAM" = "true" ] && echo -e "CONFIG_ZRAM=y\nCONFIG_ZCOMP_LZ4K=y" >> arch/arm64/configs/msm_defconfig
+          [ "$ADD_OVERLAYFS" = "true" ] && echo "CONFIG_OVERLAY_FS=y" >> arch/arm64/configs/msm_defconfig
+          
+          # 5. Build
           export ARCH=arm64
           export SUBARCH=arm64
-          
-          # Generate defconfig profile
-          make O=out msm_
-          
-          # Execute compiler using available runner cores
-          make -j$(nproc --all) O=out \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
-            CC=clang \
-            LLVM=1 \
-            LLVM_IAS=1
-            
-          echo "================================================="
-          echo " Compilation Completed Successfully"
-          echo "================================================="
-              # ===== USE YOUR TOOLS =====
-      - name: Package with YOUR mkbootimg.py
+          make O=out msm_defconfig
+          make -j$(nproc --all) O=out CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- CC=clang LLVM=1 LLVM_IAS=1
+
+      - name: Package Boot Image
         run: |
-          # Paths to YOUR files
-          KERNEL="kernel-source/arch/arm64/boot/Image.gz-"
-          RAMDISK="kernel-source/package/asop-tools/mkbootimg/boot/ramdisk"
-          BOOT_SIGNATURE="kernel-source/package/asop-tools/mkbootimg/boot/boot_signature"
-          OUT_DIR="output"
-
-          mkdir -p "$OUT_DIR"
-
-          # Use YOUR Python script
           python3 kernel-source/package/asop-tools/repack_bootimg.py \
-            --kernel "$KERNEL" \
-            --ramdisk "$RAMDISK" \
-            --cmdline "$CMDLINE" \
+            --kernel "kernel-source/out/arch/arm64/boot/Image.gz-" \
+            --ramdisk "kernel-source/package/asop-tools/mkbootimg/boot/ramdisk" \
             --base 0x80000000 \
             --pagesize 4096 \
-            --output "$OUT_DIR/Genevn-KernelSU-${{ inputs.ksu_variant }}-boot.img"
+            --output "output/Genevn-KernelSU-${{ inputs.ksu_variant }}-boot.img"
 
       - name: Upload boot.img
         uses: actions/upload-artifact@v4
