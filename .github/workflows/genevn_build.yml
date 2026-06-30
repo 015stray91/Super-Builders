@@ -10,9 +10,9 @@ on:
       kernel_target:
         description: "Kernel target"
         type: choice
-        default: "android12-5.10.209 (2024-05)"
+        default: "android12-5.10.218 (2024-05)"
         options:
-          - "android12-5.10.209 (2024-05)"
+          - "android12-5.10.218 (2024-05)"
       quick_target:
         description: "Quick select — type e.g. android15-6.6.58 (overrides dropdown)"
         type: string
