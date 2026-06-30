@@ -1,4 +1,4 @@
-name: Genevn Custom Toolchain Build
+name: Genevn Custom Toolchain Build - Full Mods
 
 on:
   workflow_dispatch:
@@ -16,61 +16,109 @@ on:
 jobs:
   build:
     name: "Build Custom Kernel - Genevn"
-    runs-on: ubuntu-latest
-    
+    runs-on: ubuntu-22.04
+    container: ghcr.io/lineageos4microg/android-kernel-build:latest
+
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
 
-      - name: Initialize Toolchain Environment
+      - name: Clone kernel source
         run: |
-          sudo apt-get update
-          sudo apt-get install -y clang lld llvm gcc-aarch64-linux-gnu binutils bc bison flex libssl-dev libelf-dev cpio kmod python3
-
-      - name: Compile Genevn Kernel
-        run: |
-          git clone --depth=1 https://github.com/015stray91/kernel-msm-1.git kernel-source
+          git clone --depth=1 https://github.com/015STRAY091/kernel-msm-1.git kernel-source
           cd kernel-source
-          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
-          
+
+      # ===== PATCHING SECTION =====
+      - name: Apply KernelSU variant
+        working-directory: kernel-source
+        run: |
+          case "${{ inputs.ksu_variant }}" in
+            "KernelSU-Next")
+              git remote add kernelsu https://github.com/tiann/KernelSU
+              git fetch kernelsu next
+              git am <(curl -sL https://raw.githubusercontent.com/tiann/KernelSU/next/patches/kernelsu.patch) || true
+              git checkout kernelsu/next -- drivers/kernelsu/ include/kernelsu/
+              ;;
+            "SukiSU")
+              curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s suki
+              ;;
+            "ReSukiSU")
+              curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s resuki
+              ;;
+            "WKSU")
+              curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s wksu
+              ;;
+          esac
+
+      - name: Apply SUFS + ZeroMount + KPM
+        working-directory: kernel-source
+        run: |
+          # SUFS
+          git remote add sufs https://github.com/tiann/SUFS
+          git fetch sufs main
+          git am <(curl -sL https://raw.githubusercontent.com/tiann/SUFS/main/patch/kernel.patch) || true
+
+          # ZeroMount
+          git remote add zeromount https://github.com/HuskyDG/ZeroMount
+          git fetch zeromount main
+          git am <(curl -sL https://raw.githubusercontent.com/HuskyDG/ZeroMount/main/patch/kernel.patch) || true
+
+          # KPM (from KernelSU Next)
+          git am <(curl -sL https://raw.githubusercontent.com/tiann/KernelSU/next/patches/kpm.patch) || true
+
+      # ===== ACK MERGE =====
+      - name: Merge ACK android12-5.10
+        working-directory: kernel-source
+        run: |
+          git remote add ack https://android.googlesource.com/kernel/common
+          git fetch ack android12-5.10
+          git merge ack/android12-5.10 --no-ff --no-commit -Xours
+          git checkout --ours drivers/kernelsu/ drivers/gpu/msm/ drivers/platform/msm/ fs/sufs/ fs/zeromount/
+          git commit -m "ACK merge + mods"
+
+      # ===== CONFIG =====
+      - name: Apply genevn + mod configs
+        working-directory: kernel-source
+        run: |
+          make ARCH=arm64 genevn_gki_defconfig
+          scripts/kconfig/merge_config.sh arch/arm64/configs/vendor/msm-genevn.config
+
+          cat > full_mods.config <<'EOF'
+          CONFIG_KERNELSU=y
+          CONFIG_KERNELSU_ENABLE_BY_DEFAULT=y
+          CONFIG_SUFS=y
+          CONFIG_SUFS_ZSTD=y
+          CONFIG_ZERO_MOUNT=y
+          CONFIG_KPM=y
+          CONFIG_KERNEL_LZ4=y
+          EOF
+          scripts/kconfig/merge_config.sh full_mods.config
+          make olddefconfig
+
+      # ===== BUILD =====
+      - name: Build kernel
+        working-directory: kernel-source
+        run: |
           export ARCH=arm64
           export SUBARCH=arm64
-          export CONFIG_KERNEL_LZ4=y
-          
-          make O=out defconfig
-          make -j$(nproc --all) O=out \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
-            CC=clang \
-            LLVM=1 \
-            LLVM_IAS=1
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
 
-      - name: Package and Verify Artifacts
+          make -j$(nproc) O=out \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            DTB:=msm/sdm435-genevn.dtb \
+            Image.gz-dtb
+
+      # ===== PACKAGE =====
+      - name: Package with AnyKernel
         run: |
-          # Verify the output exists from the compiler
-          if [ -f "kernel-source/out/arch/arm64/boot/Image.lz4" ]; then
-            cp kernel-source/out/arch/arm64/boot/Image.lz4 anykernel/Image
-          elif [ -f "kernel-source/out/arch/arm64/boot/Image" ]; then
-            cp kernel-source/out/arch/arm64/boot/Image anykernel/Image
-          else
-            echo "Error: Kernel image not found in kernel-source/out/arch/arm64/boot/"
-            exit 1
-          fi
-          
-          # Compress the local 'anykernel' directory
+          mkdir -p anykernel
+          cp kernel-source/out/arch/arm64/boot/Image.gz-dtb anykernel/
           cd anykernel
-          zip -r9 ../Genevn-KernelSU-Next-Flashable.zip *
-          
-          # Verify ZIP creation
-          if [ -f "../Genevn-KernelSU-Next-Flashable.zip" ]; then
-            echo "Successfully packaged to Genevn-KernelSU-Next-Flashable.zip"
-          else
-            echo "Error: Packaging failed"
-            exit 1
-          fi
+          zip -r9 ../Genevn-KernelSU-${{ inputs.ksu_variant }}-Flashable.zip *
 
       - name: Upload Flashable ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: Genevn-Kernel-Build
-          path: Genevn-KernelSU-Next-Flashable.zip
+          name: Genevn-Kernel-${{ inputs.ksu_variant }}
+          path: Genevn-KernelSU-${{ inputs.ksu_variant }}-Flashable.zip
