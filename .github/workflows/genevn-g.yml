@@ -1,0 +1,105 @@
+name: Genevn Custom Toolchain Build
+
+permissions:
+  contents: write
+  actions: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_target:
+        description: "Kernel target"
+        type: choice
+        default: "android12-5.10.209 (2024-05)"
+        options: ["android12-5.10.209 (2024-05)"]
+      ksu_variant:
+        description: "KernelSU variant"
+        type: choice
+        options: [KernelSU-Next, SukiSU, ReSukiSU, WKSU]
+        default: "KernelSU-Next"
+      add_susfs: { type: boolean, default: true }
+      add_zeromount: { type: boolean, default: true }
+      add_zram: { type: boolean, default: true }
+      add_bbg: { type: boolean, default: true }
+      add_overlayfs_support: { type: boolean, default: true }
+      add_kpm: { type: boolean, default: true }
+      sukisu_commit: { type: string, default: "" }
+
+jobs:
+  build:
+    name: "Build Custom Kernel - Genevn"
+    runs-on: ubuntu-22.04
+    
+    steps:
+      - name: Parse Target Details
+        id: parse
+        run: echo "codename=Genevn" >> "$GITHUB_OUTPUT"
+
+      - name: Free Disk Space
+        uses: endersonmenezes/free-disk-space@v3
+        with:
+          remove_android: true
+          remove_tool_cache: true
+
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: device-profiles.json
+          sparse-checkout-cone-mode: false
+
+      - name: Initialize Toolchain Environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld llvm gcc-aarch64-linux-gnu binutils bc bison flex libssl-dev libelf-dev cpio kmod python3
+
+      - name: Compile Genevn Kernel
+        env:
+          KSU_VARIANT: ${{ inputs.ksu_variant }}
+          CODENAME: ${{ steps.parse.outputs.codename }}
+        run: |
+          git clone --depth=1 https://github.com/015stray91/kernel-msm-1.git kernel-source
+          cd kernel-source
+          git clone --depth=1 https://android.googlesource.com/kernel/common common
+
+          ./scripts/kconfig/merge_config.sh \
+            arch/arm64/configs/gki_defconfig \
+            arch/arm64/configs/build.config.gki_kprobes \
+            arch/arm64/configs/build.config.aarch64 \
+            arch/arm64/configs/build.config.gki_kprobes.aarch64 \
+            arch/arm64/configs/build.config.allmodconfig \
+            arch/arm64/configs/build.config.allmodconfig.aarch64 \
+            arch/arm64/configs/build.config.moto \
+            arch/arm64/configs/build.config.msm.common \
+            arch/arm64/configs/build.config.msm.gki \
+            arch/arm64/configs/build.config.common \
+            arch/arm64/configs/build.config.db845c \
+            arch/arm64/configs/build.config.msm.parrot \
+            arch/arm64/configs/vendor/parrot_consolidate.config \
+            arch/arm64/configs/vendor/parrot_GKI.config \
+            arch/arm64/configs/vendor/ext_config/debug-parrot-genevn.config \
+            arch/arm64/configs/vendor/ext_config/moto-parrot-genevn.config \
+            arch/arm64/configs/vendor/ext_config/moto-parrot-gki.config \
+            arch/arm64/configs/vendor/ext_config/debug-parrot.config \
+            arch/arm64/configs/vendor/ext_config/moto-parrot.config \
+            arch/arm64/configs/vendor/ext_config/factory-parrot.config
+
+          cp .config out/
+          make -j$(nproc --all) O=out \
+            ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
+            CC=clang \
+            LLVM=1 \
+            LLVM_IAS=1
+
+      - name: Package Kernel via Boot Image Repack
+        run: |
+          cd kernel-source/packages
+          ./build_boot_image.sh ../out/arch/arm64/boot/Image.gz
+          cp ../out/boot.img ../../Genevn-Kernel-Flashable.img
+
+      - name: Push to Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Genevn-Boot-Image
+          path: Genevn-Kernel-Flashable.img
+          overwrite: true
