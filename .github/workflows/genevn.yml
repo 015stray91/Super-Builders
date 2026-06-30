@@ -1,4 +1,4 @@
-name: Genevn Custom Toolchain Build
+name: Genevn Custom Kernel Build
 
 permissions:
   contents: write
@@ -7,53 +7,11 @@ permissions:
 on:
   workflow_dispatch:
     inputs:
-      kernel_target:
-        description: "Kernel target"
-        type: choice
-        default: "android12-5.10.218 (2024-05)"
-        options:
-          - "android12-5.10.218 (2024-05)"
-      quick_target:
-        description: "Quick select"
-        type: string
-        default: ""
       ksu_variant:
         description: "KernelSU variant"
         type: choice
-        options:
-          - KernelSU-Next
-          - SukiSU
-          - ReSukiSU
-          - WKSU
+        options: [KernelSU-Next, SukiSU, ReSukiSU, WKSU]
         default: "KernelSU-Next"
-      add_susfs:
-        description: "Add SUSFS"
-        type: boolean
-        default: true
-      add_zeromount:
-        description: "Add ZeroMount"
-        type: boolean
-        default: true
-      add_zram:
-        description: "Add ZRAM with LZ4K"
-        type: boolean
-        default: true
-      add_bbg:
-        description: "Add Baseband Guard"
-        type: boolean
-        default: true
-      add_overlayfs_support:
-        description: "Add overlayfs support"
-        type: boolean
-        default: true
-      add_kpm:
-        description: "Add KPM"
-        type: boolean
-        default: true
-      sukisu_commit:
-        description: "KSU commit override"
-        type: string
-        default: ""
 
 jobs:
   build:
@@ -61,55 +19,42 @@ jobs:
     runs-on: ubuntu-22.04
     
     steps:
-      - name: Parse Target Details
-        id: parse
-        run: |
-          echo "android_version=android12" >> "$GITHUB_OUTPUT"
-          echo "kernel_version=5.10" >> "$GITHUB_OUTPUT"
-          echo "sub_level=218" >> "$GITHUB_OUTPUT"
-          echo "os_patch_level=2024-05" >> "$GITHUB_OUTPUT"
-          echo "codename=Genevn" >> "$GITHUB_OUTPUT"
-
-      - name: Free Disk Space
-        uses: endersonmenezes/free-disk-space@v3
-        with:
-          remove_android: true
-          remove_tool_cache: true
-
       - name: Checkout Repository
         uses: actions/checkout@v5
-        with:
-          sparse-checkout: device-profiles.json
-          sparse-checkout-cone-mode: true
 
-      - name: Initialize Toolchain Environment
+      - name: Initialize Toolchain and Merge Configs
         run: |
           sudo apt-get update
           sudo apt-get install -y clang lld llvm gcc-aarch64-linux-gnu binutils bc bison flex libssl-dev libelf-dev cpio kmod python3 libncurses-dev libtinfo-dev
-
-      - name: Compile Genevn Kernel
-        env:
-          KSU_VARIANT: ${{ inputs.ksu_variant }}
-          ADD_SUSFS: ${{ inputs.add_susfs }}
-          ADD_ZEROMOUNT: ${{ inputs.add_zeromount }}
-          ADD_ZRAM: ${{ inputs.add_zram }}
-          ADD_BBG: ${{ inputs.add_bbg }}
-          ADD_OVERLAYFS: ${{ inputs.add_overlayfs_support }}
-          ADD_KPM: ${{ inputs.add_kpm }}
-          SUKISU_COMMIT: ${{ inputs.sukisu_commit }}
-          CODENAME: ${{ steps.parse.outputs.codename }}
-        run: |
-          echo "Starting Kernel Compilation for: $CODENAME"
+          
+          # Clone your kernel source
           git clone --depth=1 https://github.com/015stray91/kernel-msm-1.git kernel-source
           cd kernel-source
-          git remote add ack https://android.googlesource.com/kernel/common
-          git fetch ack android12-5.10
-          git merge ack/android12-5.10 --no-ff --no-commit -Xours
+          
+          # Run the merge script with the full fragment chain
+          # This establishes your device identity and KSU/Module requirements
+          ./scripts/kconfig/merge_config.sh -m \
+            arch/arm64/configs/gki_defconfig \
+            arch/arm64/configs/vendor/build.config.msm.parrot \
+            arch/arm64/configs/vendor/consolidate_fragment.config \
+            arch/arm64/configs/vendor/ext_config/moto-parrot-genevn.config
+            
+          # Apply the merged config
+          make O=out msm_defconfig
+
+      - name: Compile Genevn Kernel
+        run: |
+          cd kernel-source
+          # Setup KernelSU
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
+          
+          # Build
           export ARCH=arm64
           export SUBARCH=arm64
-          make O=out msm_defconfig
-          make -j$(nproc --all) O=out CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- CC=clang LLVM=1 LLVM_IAS=1
+          make -j$(nproc --all) O=out \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
+            CC=clang LLVM=1 LLVM_IAS=1
 
       - name: Package Boot Image
         run: |
