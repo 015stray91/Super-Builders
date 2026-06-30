@@ -107,8 +107,7 @@ jobs:
           echo "================================================="
           name: Merge ACK
         working-directory: kernel-msm-1
-        run: |
-          # 1.git remote add ack https://android.googlesource.com/kernel/common
+      # 1.git remote add ack https://android.googlesource.com/kernel/common
           git fetch ack android12-5.10
           git merge ack/android12-5.10 --no-ff --no-commit -Xours
           git checkout --ours drivers/kernelsu/ drivers/gpu/msm/ drivers/platform/msm/
