@@ -34,7 +34,7 @@ jobs:
           mkdir -p out
           
           # Merge configurations
-          ./scripts/kconfig/merge_config.sh -m \
+          ./scripts/kconfig/merge_config.sh  \
             arch/arm64/configs/gki_defconfig \
             build.config.msm.parrot \
             arch/arm64/configs/vendor/ext_config/moto-parrot-genevn.config
