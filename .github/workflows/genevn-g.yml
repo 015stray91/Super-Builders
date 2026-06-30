@@ -83,13 +83,15 @@ jobs:
             arch/arm64/configs/vendor/ext_config/factory-parrot.config
 
           cp .config out/
-          make -j$(nproc --all) O=out \
+
+          make O=out \
             ARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
             CC=clang \
             LLVM=1 \
-            LLVM_IAS=1
+            LLVM_IAS=1 \
+            -j$(nproc --all)
 
       - name: Package Kernel via Boot Image Repack
         run: |
