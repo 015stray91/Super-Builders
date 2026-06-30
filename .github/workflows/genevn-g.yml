@@ -62,17 +62,17 @@ jobs:
 
           ./scripts/kconfig/merge_config.sh \
             arch/arm64/configs/gki_defconfig \
-            arch/arm64/configs/build.config.gki_kprobes \
-            arch/arm64/configs/build.config.aarch64 \
-            arch/arm64/configs/build.config.gki_kprobes.aarch64 \
-            arch/arm64/configs/build.config.allmodconfig \
-            arch/arm64/configs/build.config.allmodconfig.aarch64 \
-            arch/arm64/configs/build.config.moto \
-            arch/arm64/configs/build.config.msm.common \
-            arch/arm64/configs/build.config.msm.gki \
-            arch/arm64/configs/build.config.common \
-            arch/arm64/configs/build.config.db845c \
-            arch/arm64/configs/build.config.msm.parrot \
+            build.config.gki_kprobes \
+            build.config.aarch64 \
+            build.config.gki_kprobes.aarch64 \
+            build.config.allmodconfig \
+            build.config.allmodconfig.aarch64 \
+            build.config.moto \
+            build.config.msm.common \
+            build.config.msm.gki \
+            build.config.common \
+            build.config.db845c \
+            build.config.msm.parrot \
             arch/arm64/configs/vendor/parrot_consolidate.config \
             arch/arm64/configs/vendor/parrot_GKI.config \
             arch/arm64/configs/vendor/ext_config/debug-parrot-genevn.config \
