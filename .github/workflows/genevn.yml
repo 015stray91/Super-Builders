@@ -13,13 +13,12 @@ jobs:
 
       - name: Initialize Full Build Environment
         run: |
-          # Install the complete suite of build tools and libraries
+           Install the complete suite of build tools and libraries
           sudo apt-get update
-          sudo apt-get install -y \
-            build-essential libncurses5-dev libncursesw5-dev \
+          sudo apt-get install build-essential libncurses5-dev libncursesw5-dev \
             libqt5core5a libqt5gui5 libqt5widgets5 qtbase5-dev \
             clang lld llvm gcc-aarch64-linux-gnu binutils bc bison flex \
-            libssl-dev libelf-dev cpio kmod python3
+            libssl-dev libelf-dev cpio kmod python3 -y \
           
           # Clone the repository
           git clone --depth=1 https://github.com/015stray91/kernel-msm-1.git kernel-source
@@ -35,9 +34,14 @@ jobs:
           
           # Merge configurations
           ./scripts/kconfig/merge_config.sh  \
-            arch/arm64/configs/gki_defconfig \
+            arch/arm64/configs/genevn.defconfig \
+            arch/arm64/configs/nethunter_defconfig \
+            arch/arm64/configs/vendor/parrot_consolidate.config \
+            arch/arm64/configs/vendor/parrot_GKI.config \
+            arch/arm64/configs/vendor/ext_config/moto-parrot.config \
+            arch/arm64/configs/vendor/ext_config/moto-parrot-gki.config \
             build.config.msm.parrot \
-            arch/arm64/configs/vendor/ext_config/moto-parrot-genevn.config
+            arch/arm64/configs/vendor/ext_config/moto-parrot-genevn.config \
             
           # Copy the merged config to the out directory to satisfy the build system
           cp .config out/
