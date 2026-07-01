@@ -1,4 +1,5 @@
-name:genevn-moto
+name: Genevn Custom Toolchain Build
+
 permissions:
   contents: write
   actions: write
@@ -10,29 +11,64 @@ on:
         description: "Kernel target"
         type: choice
         default: "android12-5.10.209 (2024-05)"
-        options: ["android12-5.10.209 (2024-05)"]
+        options:
+          - "android12-5.10.209 (2024-05)"
+      quick_target:
+        description: "Quick select — type e.g. android15-6.6.58 (overrides dropdown)"
+        type: string
+        default: ""
       ksu_variant:
         description: "KernelSU variant"
         type: choice
-        options: [KernelSU-Next, SukiSU, ReSukiSU, WKSU]
+        options:
+          - KernelSU-Next
+          - SukiSU
+          - ReSukiSU
+          - WKSU
         default: "KernelSU-Next"
-      add_susfs: { type: boolean, default: true }
-      add_zeromount: { type: boolean, default: true }
-      add_zram: { type: boolean, default: true }
-      add_bbg: { type: boolean, default: true }
-      add_overlayfs_support: { type: boolean, default: true }
-      add_kpm: { type: boolean, default: true }
-      sukisu_commit: { type: string, default: "" }
+      add_susfs:
+        description: "Add SUSFS"
+        type: boolean
+        default: true
+      add_zeromount:
+        description: "Add ZeroMount"
+        type: boolean
+        default: true
+      add_zram:
+        description: "Add ZRAM with LZ4K"
+        type: boolean
+        default: true
+      add_bbg:
+        description: "Add Baseband Guard"
+        type: boolean
+        default: true
+      add_overlayfs_support:
+        description: "Add overlayfs support"
+        type: boolean
+        default: true
+      add_kpm:
+        description: "Add KPM (SukiSU/ReSukiSU)"
+        type: boolean
+        default: true
+      sukisu_commit:
+        description: "KSU commit override (empty = latest)"
+        type: string
+        default: ""
 
 jobs:
   build:
     name: "Build Custom Kernel - Genevn"
-    runs-on: ubuntu-22.04
-    
+    runs-on: ubuntu-latest
+
     steps:
       - name: Parse Target Details
         id: parse
-        run: echo "codename=Genevn" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "android_version=android12" >> "$GITHUB_OUTPUT"
+          echo "kernel_version=5.10" >> "$GITHUB_OUTPUT"
+          echo "sub_level=209" >> "$GITHUB_OUTPUT"
+          echo "os_patch_level=2024-05" >> "$GITHUB_OUTPUT"
+          echo "codename=Genevn" >> "$GITHUB_OUTPUT"
 
       - name: Free Disk Space
         uses: endersonmenezes/free-disk-space@v3
@@ -53,12 +89,29 @@ jobs:
       - name: Compile Genevn Kernel
         env:
           KSU_VARIANT: ${{ inputs.ksu_variant }}
+          ADD_SUSFS: ${{ inputs.add_susfs }}
+          ADD_ZEROMOUNT: ${{ inputs.add_zeromount }}
+          ADD_ZRAM: ${{ inputs.add_zram }}
+          ADD_BBG: ${{ inputs.add_bbg }}
+          ADD_OVERLAYFS: ${{ inputs.add_overlayfs_support }}
+          ADD_KPM: ${{ inputs.add_kpm }}
+          SUKISU_COMMIT: ${{ inputs.sukisu_commit }}
           CODENAME: ${{ steps.parse.outputs.codename }}
         run: |
+          echo "================================================="
+          echo " Starting Kernel Compilation for: $CODENAME"
+          echo "================================================="
+
+          # 1. Clone the MSM Kernel Source Tree
+          echo "Cloning Motorola MSM kernel repository..."
           git clone --depth=1 https://github.com/015stray91/kernel-msm-1.git kernel-source
           cd kernel-source
           git clone --depth=1 https://android.googlesource.com/kernel/common common
 
+          # ===== FIX: Clean output directory only =====
+          rm -rf out/
+
+          # 2. Merge all config fragments
           ./scripts/kconfig/merge_config.sh \
             arch/arm64/configs/gki_defconfig \
             build.config.gki_kprobes \
@@ -83,6 +136,14 @@ jobs:
 
           cp .config out/
 
+          # 3. Build kernel
+          echo "================================================="
+          echo " Launching Toolchain Compiler"
+          echo "================================================="
+
+          export ARCH=arm64
+          export SUBARCH=arm64
+
           make O=out \
             ARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-gnu- \
@@ -91,6 +152,10 @@ jobs:
             LLVM=1 \
             LLVM_IAS=1 \
             -j$(nproc --all)
+
+          echo "================================================="
+          echo " Compilation Completed Successfully"
+          echo "================================================="
 
       - name: Package Kernel via Boot Image Repack
         run: |
@@ -103,5 +168,5 @@ jobs:
         with:
           name: Genevn-Boot-Image
           path: Genevn-Kernel-Flashable.img
+          compression-level: 9
           overwrite: true
-This branch is 112 commits ahead of Enginex0/Super-Builders:mai
