@@ -1,5 +1,4 @@
-na Where I've been at right now and you can see that he's kind of changed stuff in the structuring to I'm gonna check yours out right now I'm gonna put it in as a separate. Yeah, I'm gonna see if it if it passes through but one thing I'm gonna tell you you can't put for the window for when it says the building you got to put the dot config because whenever you do the merging and It says it saves it as a .config. I can show you in the output. So if you put def.config, it's not going to do it. It's going to default it again. Because that's what the DEF stands for. It's default. We don't want to run our own rover, right? And we can't use the parcel, the dash in, because the dash in keeps it from running the make, and it kills the build. I can give you all the logs right now. Look. me: Genevn Custom Toolchain Build
-
+name:genevn-moto
 permissions:
   contents: write
   actions: write
