@@ -58,7 +58,7 @@ on:
 jobs:
   build:
     name: "Build Custom Kernel - Genevn"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Parse Target Details
@@ -76,24 +76,17 @@ jobs:
           remove_android: true
           remove_tool_cache: true
 
-      - uses: actions/checkout@v5
+      - name: Checkout
+        uses: actions/checkout@v5
         with:
-          sparse-checkout: device-profiles.json
+          sparse-checkout: |
+            device-profiles.json
           sparse-checkout-cone-mode: false
 
       - name: Initialize Toolchain (Clang 12 + LLVM 12)
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            clang-12 lld-12 llvm-12 \
-            gcc-aarch64-linux-gnu binutils bc bison flex \
-            libssl-dev libelf-dev cpio kmod python3
-
-      - name: Verify Toolchain
-        run: |
-          clang-12 --version
-          lld-12 --version
-          aarch64-linux-gnu-gcc --version
+          sudo apt-get install -y clang-12 lld-12 llvm-12 gcc-aarch64-linux-gnu binutils bc bison flex libssl-dev libelf-dev cpio kmod python3
 
       - name: Clone Kernel Source
         run: |
@@ -109,8 +102,8 @@ jobs:
       - name: Prepare Module Lists
         run: |
           cd kernel-source
-          if [ -f ../../modules.list ]; then cp ../../modules.list .; fi
-          if [ -f ../../modules.blocklist ]; then cp ../../modules.blocklist .; fi
+          cp packages/modules.list .
+          cp packages/modules.blocklist .
 
       - name: Apply Custom Patches
         run: |
@@ -213,13 +206,13 @@ jobs:
             CLANG_TRIPLE=aarch64-linux-gnu- \
             LLVM=1 \
             LLVM_IAS=1 \
-            Image.gz-dtb \
+            Image.gz \
             -j$(nproc --all) || exit 1
 
       - name: Package Kernel
         run: |
           cd kernel-source/packages
-          ./build_boot_image.sh ../out/arch/arm64/boot/Image.gz-dtb
+          ./build_boot_image.sh ../out/arch/arm64/boot/Image.gz
           cp ../out/boot.img ../../Genevn-Kernel-Flashable.img
 
       - name: Upload Artifact
