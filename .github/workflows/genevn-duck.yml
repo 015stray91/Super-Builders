@@ -94,8 +94,8 @@ jobs:
         run: |
           cd kernel-msm-1
           
-          sudo mv ../modules.vendor_blocklist common
-          sudo mv ../modules.list.msm.parrot common
+          sudo mv modules.vendor_blocklist.msm.parrot common
+          sudo mv modules.list.msm.parrot common
 
       - name: Apply Patches
         run: |
