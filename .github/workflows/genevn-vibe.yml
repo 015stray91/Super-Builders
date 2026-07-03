@@ -17,7 +17,7 @@ on:
         description: "Quick select — type e.g. android15-6.6.58 (overrides dropdown)"
         type: string
         default: ""
-      ksu_variant:
+      ksu_variant:yml
         description: "KernelSU variant"
         type: choice
         options:
@@ -101,9 +101,8 @@ jobs:
 
       - name: Prepare Module Lists
         run: |
-          cd kernel-source
-          cp /modules.list .
-          cp /modules.blocklist .
+          cp /modules.list.msm.parrot
+          cp /modules.vendor_blocklist.msm.parrot
          
       - name: Apply Custom Patches
         run: |
