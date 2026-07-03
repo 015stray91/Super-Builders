@@ -93,30 +93,44 @@ jobs:
       - name: Prepare Patches & Module Lists
         run: |
           cd kernel-msm-1
-          mkdir -p common/patches
-          cp ../patches/*patch common/patches/
-          cp ../modules.vendor_blocklist common/
-          cp ../modules.list.msm.parrot common/
+          
+          sudo mv../modules.vendor_blocklist common
+          sudo mv../modules.list.msm.parrot common
 
       - name: Apply Patches
         run: |
           cd kernel-msm-1
-          chmod +x scripts/kconfig/apply-kernel-patches.sh
-          scripts/kconfig/apply-kernel-patches.sh "$PWD" "5.10.209" "common/patches"
-
-      - name: Run Compatibility Scripts
+          chmod +x scripts/kconfig/apply-kernel-patches.sh \
+          sudo ./scripts/kconfig/apply-kernel-patches.sh kernel-msm-1 android12-5.10 kernel-msm-1/patches \
+        
+          - name: Apply Feature Toggles
+        env:
+          KSU_VARIANT: ${{ inputs.ksu_variant }}
+          ADD_SUSFS: ${{ inputs.add_susfs }}
+          ADD_ZEROMOUNT: ${{ inputs.add_zeromount }}
+          ADD_ZRAM: ${{ inputs.add_zram }}
+          ADD_BBG: ${{ inputs.add_bbg }}
+          ADD_OVERLAYFS: ${{ inputs.add_overlayfs_support }}
+          ADD_KPM: ${{ inputs.add_kpm }}
+       run: |
+          cd kernel-msm-1
+          [[ "$ADD_SUSFS" == "true" ]] && scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/susfs.config
+          [[ "$ADD_ZEROMOUNT" == "true" ]] && scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/zeromount.config
+          [[ "$ADD_ZRAM" == "true" ]] && scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/zram.config
+          [[ "$ADD_BBG" == "true" ]] && scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/bbg.config
+          [[ "$ADD_OVERLAYFS" == "true" ]] && scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/overlayfs.config
+          [[ "$ADD_KPM" == "true" ]] && scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/kpm.config
+          case "$KSU_VARIANT" in
+            "KernelSU-Next") scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/ksu-next.config ;;
+            "SukiSU") scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/sukisu.config ;;
+            "ReSukiSU") scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/resukisu.config ;;
+            "WKSU") scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/wksu.config ;;
+          esac
+          
+           - name: Merge Configs
         run: |
           cd kernel-msm-1
-          chmod +x scripts/kconfig/*.sh
-          ./scripts/kconfig/fix-old-kernel-compat.sh
-          ./scripts/kconfig/fix-susfs-compat.sh
-          ./scripts/kconfig/bypass-oem-abi.sh
-          ./scripts/kconfig/setup-bbg.sh
-
-      - name: Merge Configs
-        run: |
-          cd kernel-msm-1
-          ./scripts/kconfig/merge_config.sh \
+            sudo ./scripts/kconfig/merge_config.sh \
             arch/arm64/configs/ksu-nethunter.defconfig \
             build.config.gki_kprobes \
             build.config.aarch64 \
@@ -135,31 +149,7 @@ jobs:
             arch/arm64/configs/vendor/ext_config/debug-parrot.config \
             arch/arm64/configs/vendor/ext_config/moto-parrot.config \
             arch/arm64/configs/vendor/ext_config/moto-parrot-genevn.config
-          cp .config out/
-
-      - name: Apply Feature Toggles
-        env:
-          KSU_VARIANT: ${{ inputs.ksu_variant }}
-          ADD_SUSFS: ${{ inputs.add_susfs }}
-          ADD_ZEROMOUNT: ${{ inputs.add_zeromount }}
-          ADD_ZRAM: ${{ inputs.add_zram }}
-          ADD_BBG: ${{ inputs.add_bbg }}
-          ADD_OVERLAYFS: ${{ inputs.add_overlayfs_support }}
-          ADD_KPM: ${{ inputs.add_kpm }}
-        run: |
-          cd kernel-msm-1
-          [[ "$ADD_SUSFS" == "true" ]] && scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/susfs.config
-          [[ "$ADD_ZEROMOUNT" == "true" ]] && scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/zeromount.config
-          [[ "$ADD_ZRAM" == "true" ]] && scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/zram.config
-          [[ "$ADD_BBG" == "true" ]] && scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/bbg.config
-          [[ "$ADD_OVERLAYFS" == "true" ]] && scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/overlayfs.config
-          [[ "$ADD_KPM" == "true" ]] && scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/kpm.config
-          case "$KSU_VARIANT" in
-            "KernelSU-Next") scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/ksu-next.config ;;
-            "SukiSU") scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/sukisu.config ;;
-            "ReSukiSU") scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/resukisu.config ;;
-            "WKSU") scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/wksu.config ;;
-          esac
+        $PWD" 
           cp .config out/
 
       - name: Build Kernel
