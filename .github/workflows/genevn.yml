@@ -10,7 +10,7 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-
+        sparse-checkout: ["device-profiles.json"]
       - name: Initialize Full Build Environment
         run: |
            Install the complete suite of build tools and libraries
