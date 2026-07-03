@@ -75,35 +75,41 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang-12 lld-12 llvm-12 gcc-aarch64-linux-gnu \
             binutils bc bison flex libssl-dev libelf-dev cpio kmod python3 \
-            make device-tree-compiler patch\
+            make device-tree-compiler
 
       - name: Clone Kernel Source
         run: |
-          git clone --depth=1 https://github.com/015stray91/kernel-msm-1.git kernel-source
-          cd kernel-source
-          git clone --depth=1 https://android.googlesource.com/kernel/common /kernel-msm-1/common
+          git clone --depth=1 https://github.com/015stray91/kernel-msm-1.git kernel-msm-1
+          cd kernel-msm-1
+          git clone --depth=1 https://android.googlesource.com/kernel/common common
 
       - name: Prepare Patches & Module Lists
         run: |
-          
-          sudo mkdir -p  /kernel-msm-1/common/patches \
-          sudo mv patches common/patches \
-          sudo mv modules.vendor_blocklist common \
-          sudo mv modules.list.msm.parrot common \
-          
+          cd kernel-msm-1
+          mkdir -p common/patches
+          cp ../patches/*.patch common/patches/
+          cp ../modules.vendor_blocklist common/
+          cp ../modules.list.msm.parrot common/
+
+      - name: Apply Patches
+        run: |
+          cd kernel-msm-1
+          chmod +x scripts/kconfig/apply-kernel-patches.sh
+          scripts/kconfig/apply-kernel-patches.sh "$PWD" "5.10.209" "common/patches"
+
       - name: Run Compatibility Scripts
         run: |
-            chmod +x /kernel-msm-1/scripts/kconfig/*.sh
-            cd /kernel-msm-1
-            sudo ./scripts/kconfig/fix-old-kernel-compat.sh \
-            sudo ./scripts/kconfig/fix-susfs-compat.sh \
-            sudo ./scripts/kconfig/bypass-oem-abi.sh \
-            sudo ./scripts/kconfig/setup-bbg.sh \
-            sudo ./scripts/kconfig/apply-kernel-patches.sh . android12-5.10 ./common/patches
+          cd kernel-msm-1
+          chmod +x scripts/kconfig/*.sh
+          ./scripts/kconfig/fix-old-kernel-compat.sh
+          ./scripts/kconfig/fix-susfs-compat.sh
+          ./scripts/kconfig/bypass-oem-abi.sh
+          ./scripts/kconfig/setup-bbg.sh
 
       - name: Merge Configs
         run: |
-         scripts/kconfig/merge_config.sh \
+          cd kernel-msm-1
+          ./scripts/kconfig/merge_config.sh \
             arch/arm64/configs/ksu-nethunter.defconfig \
             build.config.gki_kprobes \
             build.config.aarch64 \
@@ -122,6 +128,7 @@ jobs:
             arch/arm64/configs/vendor/ext_config/debug-parrot.config \
             arch/arm64/configs/vendor/ext_config/moto-parrot.config \
             arch/arm64/configs/vendor/ext_config/moto-parrot-genevn.config
+          cp .config out/
 
       - name: Apply Feature Toggles
         env:
@@ -133,6 +140,7 @@ jobs:
           ADD_OVERLAYFS: ${{ inputs.add_overlayfs_support }}
           ADD_KPM: ${{ inputs.add_kpm }}
         run: |
+          cd kernel-msm-1
           [[ "$ADD_SUSFS" == "true" ]] && scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/susfs.config
           [[ "$ADD_ZEROMOUNT" == "true" ]] && scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/zeromount.config
           [[ "$ADD_ZRAM" == "true" ]] && scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/zram.config
@@ -145,11 +153,11 @@ jobs:
             "ReSukiSU") scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/resukisu.config ;;
             "WKSU") scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/wksu.config ;;
           esac
-          cp .config out /
+          cp .config out/
 
       - name: Build Kernel
         run: |
-          cd kernel-source
+          cd kernel-msm-1
           export ARCH=arm64
           export SUBARCH=arm64
           export CROSS_COMPILE="aarch64-linux-gnu-"
@@ -166,7 +174,7 @@ jobs:
 
       - name: Package Kernel
         run: |
-          cd kernel-source/packages
+          cd kernel-msm-1/packages
           ./build_boot_image.sh ../out/arch/arm64/boot/Image.gz
           cp ../out/boot.img ../../Genevn-Kernel-Flashable.img
 
