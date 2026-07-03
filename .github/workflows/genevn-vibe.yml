@@ -21,11 +21,11 @@ on:
         description: "KernelSU variant"
         type: boolean
         options:
-          
+           -Ksu-next
           - SukiSU
           - ReSukiS
           - WKSU
-        default: "KernelSU-Next"
+        default: "Ksu-Next"
       add_susfs:
         description: "Add SUSFS"
         type: boolean
@@ -47,7 +47,7 @@ on:
         type: boolean
         default: true
       add_kpm:
-        description: "Add KPM (SukiSU/ReSukiSU)"
+        description: "Add KPM"
         type: boolean
         default: true
       sukisu_commit:
@@ -86,13 +86,42 @@ jobs:
       - name: Initialize Toolchain (Clang 12 + LLVM 12)
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-12 lld-12 llvm-12 gcc-aarch64-linux-gnu binutils bc bison flex libssl-dev libelf-dev cpio kmod python3
+          sudo apt-get install -y clang-12 lld-12 llvm-12 gcc-aarch64-linux-gnu \
+          binutils bc bison flex libssl-dev libelf-dev cpio kmod python3 \
+          make node
 
-      - name: Clone Kernel Source
+      - name: Clone Kernel Source (LOCK fork branch + tag + verify HEADs)
         run: |
-          git clone --depth=1 https://github.com/015stray91/kernel-msm-1.git kernel-source
-          cd kernel-source
-          git clone --depth=1 https://android.googlesource.com/kernel/common common
+          set -euo pipefail
+
+          FORK_URL="https://github.com/015stray91/kernel-msm-1.git"
+          FORK_DIR="kernel-source"
+
+          FORK_BRANCH="android-14-release-u1tgns34.42.86-2-32"
+          FORK_TAG="MMI-U1TGNS34.42-86-2-32"
+
+          rm -rf "$FORK_DIR"
+          git clone --depth=1 "$FORK_URL" "$FORK_DIR"
+          cd "$FORK_DIR"
+
+          # Lock to branch first
+          git fetch --depth=1 origin "$FORK_BRANCH"
+          git checkout -B "$FORK_BRANCH" "origin/$FORK_BRANCH"
+          echo "After branch checkout:"
+          git status -sb
+          echo "Branch HEAD (short): $(git rev-parse --short HEAD)"
+          git --no-pager log -1 --oneline
+
+          # Then lock to tag
+          git fetch --depth=1 --tags origin "$FORK_TAG"
+          git checkout -B "tag-$FORK_TAG" "$FORK_TAG"
+          echo "After tag checkout:"
+          git status -sb
+          echo "Tag HEAD (short): $(git rev-parse --short HEAD)"
+          git --no-pager log -1 --oneline
+
+          echo "Tag points to:"
+          git rev-list -n 1 "$FORK_TAG"
 
       - name: Clean Output Directory
         run: |
@@ -103,7 +132,7 @@ jobs:
         run: |
           cp /modules.list.msm.parrot
           cp /modules.vendor_blocklist.msm.parrot
-         
+
       - name: Apply Custom Patches
         run: |
           cd kernel-source
