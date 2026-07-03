@@ -102,14 +102,14 @@ jobs:
       - name: Prepare Module Lists
         run: |
           cd kernel-source
-          cp packages/modules.list .
-          cp packages/modules.blocklist .
-
+          cp /modules.list .
+          cp /modules.blocklist .
+         
       - name: Apply Custom Patches
         run: |
           cd kernel-source
           if [ -d "patches" ]; then
-            for patch in patches/*.patch; do
+            for .patch in /patches/*.patch; do
               if [ -f "$patch" ]; then
                 git apply --check "$patch" && git apply "$patch" || echo "::warning:: Patch failed: $patch"
               fi
