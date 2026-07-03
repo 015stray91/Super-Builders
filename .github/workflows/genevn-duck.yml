@@ -85,17 +85,14 @@ jobs:
 
       - name: Prepare Patches & Module Lists
         run: |
-          cd kernel-source
-          mkdir -p patches
-          cp ../common/patches/*.patch patches/
-          cp ../modules.list .
-          cp ../modules.blocklist .
-          cp ../modules.vendor_blocklist .
-          cp ../modules.list.msm.parrot .
-
+          
+          mkdir -p common/patches \
+          cp patches/*.patch common/patches \
+          cp /modules.vendor_blocklist .
+          cp /modules.list.msm.parrot .
+          
       - name: Run Compatibility Scripts
         run: |
-          cd kernel-source
           chmod +x scripts/kconfig/*.sh
           ./scripts/kconfig/fix-old-kernel-compat.sh
           ./scripts/kconfig/fix-susfs-compat.sh
@@ -104,8 +101,7 @@ jobs:
 
       - name: Merge Configs
         run: |
-          cd kernel-source
-          ./scripts/kconfig/merge_config.sh \
+         scripts/kconfig/merge_config.sh \
             arch/arm64/configs/ksu-nethunter.defconfig \
             build.config.gki_kprobes \
             build.config.aarch64 \
@@ -135,7 +131,6 @@ jobs:
           ADD_OVERLAYFS: ${{ inputs.add_overlayfs_support }}
           ADD_KPM: ${{ inputs.add_kpm }}
         run: |
-          cd kernel-source
           [[ "$ADD_SUSFS" == "true" ]] && scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/susfs.config
           [[ "$ADD_ZEROMOUNT" == "true" ]] && scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/zeromount.config
           [[ "$ADD_ZRAM" == "true" ]] && scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/zram.config
@@ -148,7 +143,7 @@ jobs:
             "ReSukiSU") scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/resukisu.config ;;
             "WKSU") scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/wksu.config ;;
           esac
-          cp .config out/
+          cp .config out /
 
       - name: Build Kernel
         run: |
