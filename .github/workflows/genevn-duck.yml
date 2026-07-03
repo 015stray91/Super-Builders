@@ -92,8 +92,6 @@ jobs:
 
       - name: Prepare Patches & Module Lists
         run: |
-          cd kernel-msm-1
-          
           sudo mv modules.vendor_blocklist.msm.parrot common 
           sudo mv modules.list.msm.parrot common
 
