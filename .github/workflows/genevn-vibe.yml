@@ -17,13 +17,13 @@ on:
         description: "Quick select — type e.g. android15-6.6.58 (overrides dropdown)"
         type: string
         default: ""
-      ksu_variant:yml
+      ksu_variant:
         description: "KernelSU variant"
-        type: choice
+        type: boolean
         options:
-          - KernelSU-Next
+          
           - SukiSU
-          - ReSukiSU
+          - ReSukiS
           - WKSU
         default: "KernelSU-Next"
       add_susfs:
