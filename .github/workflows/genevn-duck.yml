@@ -94,16 +94,16 @@ jobs:
         run: |
           cd kernel-msm-1
           
-          sudo mv../modules.vendor_blocklist common
-          sudo mv../modules.list.msm.parrot common
+          sudo mv ../modules.vendor_blocklist common
+          sudo mv ../modules.list.msm.parrot common
 
       - name: Apply Patches
         run: |
           cd kernel-msm-1
-          chmod +x scripts/kconfig/apply-kernel-patches.sh \
-          sudo ./scripts/kconfig/apply-kernel-patches.sh kernel-msm-1 android12-5.10 kernel-msm-1/patches \
-        
-          - name: Apply Feature Toggles
+          chmod +x scripts/kconfig/apply-kernel-patches.sh
+          sudo ./scripts/kconfig/apply-kernel-patches.sh kernel-msm-1 android12-5.10 kernel-msm-1/patches
+
+      - name: Apply Feature Toggles
         env:
           KSU_VARIANT: ${{ inputs.ksu_variant }}
           ADD_SUSFS: ${{ inputs.add_susfs }}
@@ -112,7 +112,7 @@ jobs:
           ADD_BBG: ${{ inputs.add_bbg }}
           ADD_OVERLAYFS: ${{ inputs.add_overlayfs_support }}
           ADD_KPM: ${{ inputs.add_kpm }}
-       run: |
+        run: |
           cd kernel-msm-1
           [[ "$ADD_SUSFS" == "true" ]] && scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/susfs.config
           [[ "$ADD_ZEROMOUNT" == "true" ]] && scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/zeromount.config
@@ -126,11 +126,11 @@ jobs:
             "ReSukiSU") scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/resukisu.config ;;
             "WKSU") scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/wksu.config ;;
           esac
-          
-           - name: Merge Configs
+
+      - name: Merge Configs
         run: |
           cd kernel-msm-1
-            sudo ./scripts/kconfig/merge_config.sh \
+          sudo ./scripts/kconfig/merge_config.sh \
             arch/arm64/configs/ksu-nethunter.defconfig \
             build.config.gki_kprobes \
             build.config.aarch64 \
@@ -149,7 +149,6 @@ jobs:
             arch/arm64/configs/vendor/ext_config/debug-parrot.config \
             arch/arm64/configs/vendor/ext_config/moto-parrot.config \
             arch/arm64/configs/vendor/ext_config/moto-parrot-genevn.config
-        $PWD" 
           cp .config out/
 
       - name: Build Kernel
