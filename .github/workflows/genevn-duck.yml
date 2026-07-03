@@ -94,7 +94,7 @@ jobs:
         run: |
           cd kernel-msm-1
           mkdir -p common/patches
-          cp ../patches/*.patch common/patches/
+          cp ../patches/*patch common/patches/
           cp ../modules.vendor_blocklist common/
           cp ../modules.list.msm.parrot common/
 
