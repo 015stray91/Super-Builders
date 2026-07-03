@@ -86,18 +86,19 @@ jobs:
       - name: Prepare Patches & Module Lists
         run: |
           
-          mkdir -p common/patches \
-          cp patches/*.patch common/patches \
-          cp /modules.vendor_blocklist .
-          cp /modules.list.msm.parrot .
+          sudo mkdir -p common/patches \
+          sudo mv patches common/patches \
+          sudo mv modules.vendor_blocklist common \
+          sudo mv modules.list.msm.parrot common \
           
       - name: Run Compatibility Scripts
         run: |
           chmod +x scripts/kconfig/*.sh
-          ./scripts/kconfig/fix-old-kernel-compat.sh
-          ./scripts/kconfig/fix-susfs-compat.sh
-          ./scripts/kconfig/bypass-oem-abi.sh
-          ./scripts/kconfig/setup-bbg.sh
+          
+           scripts/kconfig/fix-old-kernel-compat.sh
+           scripts/kconfig/fix-susfs-compat.sh
+           scripts/kconfig/bypass-oem-abi.sh
+           scripts/kconfig/setup-bbg.sh
 
       - name: Merge Configs
         run: |
