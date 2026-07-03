@@ -81,39 +81,53 @@ jobs:
           sparse-checkout: device-profiles.json
           sparse-checkout-cone-mode: false
 
-      - name: Initialize Toolchain Environment
+      - name: Initialize Toolchain (Clang 12 + LLVM 12)
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang lld llvm gcc-aarch64-linux-gnu binutils bc bison flex libssl-dev libelf-dev cpio kmod python3
+          sudo apt-get install -y \
+            clang-12 lld-12 llvm-12 \
+            gcc-aarch64-linux-gnu binutils bc bison flex \
+            libssl-dev libelf-dev cpio kmod python3
 
-      - name: Compile Genevn Kernel
-        env:
-          KSU_VARIANT: ${{ inputs.ksu_variant }}
-          ADD_SUSFS: ${{ inputs.add_susfs }}
-          ADD_ZEROMOUNT: ${{ inputs.add_zeromount }}
-          ADD_ZRAM: ${{ inputs.add_zram }}
-          ADD_BBG: ${{ inputs.add_bbg }}
-          ADD_OVERLAYFS: ${{ inputs.add_overlayfs_support }}
-          ADD_KPM: ${{ inputs.add_kpm }}
-          SUKISU_COMMIT: ${{ inputs.sukisu_commit }}
-          CODENAME: ${{ steps.parse.outputs.codename }}
+      - name: Verify Toolchain
         run: |
-          echo "================================================="
-          echo " Starting Kernel Compilation for: $CODENAME"
-          echo "================================================="
+          clang-12 --version
+          lld-12 --version
+          aarch64-linux-gnu-gcc --version
 
-          # 1. Clone the MSM Kernel Source Tree
-          echo "Cloning Motorola MSM kernel repository..."
+      - name: Clone Kernel Source
+        run: |
           git clone --depth=1 https://github.com/015stray91/kernel-msm-1.git kernel-source
           cd kernel-source
           git clone --depth=1 https://android.googlesource.com/kernel/common common
 
-          # ===== FIX: Clean output directory only =====
+      - name: Clean Output Directory
+        run: |
+          cd kernel-source
           rm -rf out/
 
-          # 2. Merge all config fragments
+      - name: Prepare Module Lists
+        run: |
+          cd kernel-source
+          if [ -f ../../modules.list ]; then cp ../../modules.list .; fi
+          if [ -f ../../modules.blocklist ]; then cp ../../modules.blocklist .; fi
+
+      - name: Apply Custom Patches
+        run: |
+          cd kernel-source
+          if [ -d "patches" ]; then
+            for patch in patches/*.patch; do
+              if [ -f "$patch" ]; then
+                git apply --check "$patch" && git apply "$patch" || echo "::warning:: Patch failed: $patch"
+              fi
+            done
+          fi
+
+      - name: Merge Config Fragments
+        run: |
+          cd kernel-source
           ./scripts/kconfig/merge_config.sh \
-            arch/arm64/configs/gki_defconfig \
+            arch/arm64/configs/ksu-nethunter.defconfig \
             build.config.gki_kprobes \
             build.config.aarch64 \
             build.config.gki_kprobes.aarch64 \
@@ -125,45 +139,90 @@ jobs:
             build.config.common \
             build.config.db845c \
             build.config.msm.parrot \
-            arch/arm64/configs/vendor/parrot_consolidate.config \
             arch/arm64/configs/vendor/parrot_GKI.config \
             arch/arm64/configs/vendor/ext_config/debug-parrot-genevn.config \
-            arch/arm64/configs/vendor/ext_config/moto-parrot-genevn.config \
             arch/arm64/configs/vendor/ext_config/moto-parrot-gki.config \
             arch/arm64/configs/vendor/ext_config/debug-parrot.config \
             arch/arm64/configs/vendor/ext_config/moto-parrot.config \
-            arch/arm64/configs/vendor/ext_config/factory-parrot.config
+            arch/arm64/configs/vendor/ext_config/moto-parrot-genevn.config
 
+      - name: Apply Feature Toggles
+        env:
+          KSU_VARIANT: ${{ inputs.ksu_variant }}
+          ADD_SUSFS: ${{ inputs.add_susfs }}
+          ADD_ZEROMOUNT: ${{ inputs.add_zeromount }}
+          ADD_ZRAM: ${{ inputs.add_zram }}
+          ADD_BBG: ${{ inputs.add_bbg }}
+          ADD_OVERLAYFS: ${{ inputs.add_overlayfs_support }}
+          ADD_KPM: ${{ inputs.add_kpm }}
+        run: |
+          cd kernel-source
+          if [ "$ADD_SUSFS" = "true" ]; then
+            scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/susfs.config
+          fi
+          if [ "$ADD_ZEROMOUNT" = "true" ]; then
+            scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/zeromount.config
+          fi
+          if [ "$ADD_ZRAM" = "true" ]; then
+            scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/zram.config
+          fi
+          if [ "$ADD_BBG" = "true" ]; then
+            scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/bbg.config
+          fi
+          if [ "$ADD_OVERLAYFS" = "true" ]; then
+            scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/overlayfs.config
+          fi
+          if [ "$ADD_KPM" = "true" ]; then
+            scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/kpm.config
+          fi
+          case "$KSU_VARIANT" in
+            "KernelSU-Next")
+              scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/ksu-next.config
+              ;;
+            "SukiSU")
+              scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/sukisu.config
+              ;;
+            "ReSukiSU")
+              scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/resukisu.config
+              ;;
+            "WKSU")
+              scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/wksu.config
+              ;;
+          esac
           cp .config out/
 
-          # 3. Build kernel
-          echo "================================================="
-          echo " Launching Toolchain Compiler"
-          echo "================================================="
-
+      - name: Build Kernel
+        run: |
+          cd kernel-source
           export ARCH=arm64
           export SUBARCH=arm64
-
+          export CROSS_COMPILE="aarch64-linux-gnu-"
+          export LLVM=1
+          export LLVM_IAS=1
+          export CC="clang-12"
+          export LD="ld.lld-12"
+          export AR="llvm-ar-12"
+          export NM="llvm-nm-12"
+          export OBJCOPY="llvm-objcopy-12"
+          export OBJDUMP="llvm-objdump-12"
+          export STRIP="llvm-strip-12"
           make O=out \
             ARCH=arm64 \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
-            CC=clang \
+            CC=clang-12 \
+            LD=ld.lld-12 \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
             LLVM=1 \
             LLVM_IAS=1 \
-            -j$(nproc --all)
+            Image.gz-dtb \
+            -j$(nproc --all) || exit 1
 
-          echo "================================================="
-          echo " Compilation Completed Successfully"
-          echo "================================================="
-
-      - name: Package Kernel via Boot Image Repack
+      - name: Package Kernel
         run: |
           cd kernel-source/packages
-          ./build_boot_image.sh ../out/arch/arm64/boot/Image.gz
+          ./build_boot_image.sh ../out/arch/arm64/boot/Image.gz-dtb
           cp ../out/boot.img ../../Genevn-Kernel-Flashable.img
 
-      - name: Push to Artifacts
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Genevn-Boot-Image
