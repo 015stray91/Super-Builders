@@ -75,29 +75,30 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang-12 lld-12 llvm-12 gcc-aarch64-linux-gnu \
             binutils bc bison flex libssl-dev libelf-dev cpio kmod python3 \
-            make device-tree-compiler
+            make device-tree-compiler patch\
 
       - name: Clone Kernel Source
         run: |
           git clone --depth=1 https://github.com/015stray91/kernel-msm-1.git kernel-source
           cd kernel-source
-          git clone --depth=1 https://android.googlesource.com/kernel/common common
+          git clone --depth=1 https://android.googlesource.com/kernel/common /kernel-msm-1/common
 
       - name: Prepare Patches & Module Lists
         run: |
           
-          sudo mkdir -p common/patches \
+          sudo mkdir -p  /kernel-msm-1/common/patches \
           sudo mv patches common/patches \
           sudo mv modules.vendor_blocklist common \
           sudo mv modules.list.msm.parrot common \
           
       - name: Run Compatibility Scripts
         run: |
-            chmod +x scripts/kconfig/*.sh
-            sudo ./scripts/kconfig/fix-old-kernel-compat.sh
-            sudo ./scripts/kconfig/fix-susfs-compat.sh
-            sudo ./scripts/kconfig/bypass-oem-abi.sh
-            sudo ./scripts/kconfig/setup-bbg.sh
+            chmod +x /kernel-msm-1/scripts/kconfig/*.sh
+            cd /kernel-msm-1
+            sudo ./scripts/kconfig/fix-old-kernel-compat.sh \
+            sudo ./scripts/kconfig/fix-susfs-compat.sh \
+            sudo ./scripts/kconfig/bypass-oem-abi.sh \
+            sudo ./scripts/kconfig/setup-bbg.sh \
             sudo ./scripts/kconfig/apply-kernel-patches.sh . android12-5.10 ./common/patches
 
       - name: Merge Configs
