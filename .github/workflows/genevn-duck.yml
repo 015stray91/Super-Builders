@@ -69,6 +69,13 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          sparse-checkout: |
+            device-profiles.json
+            patches/
+            modules.vendor_blocklist
+            modules.list.msm.parrot
+          sparse-checkout-cone-mode: false
 
       - name: Initialize Toolchain
         run: |
