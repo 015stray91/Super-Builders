@@ -93,12 +93,12 @@ jobs:
           
       - name: Run Compatibility Scripts
         run: |
-          chmod +x scripts/kconfig/*.sh
-          
-           scripts/kconfig/fix-old-kernel-compat.sh
-           scripts/kconfig/fix-susfs-compat.sh
-           scripts/kconfig/bypass-oem-abi.sh
-           scripts/kconfig/setup-bbg.sh
+            chmod +x scripts/kconfig/*.sh
+            sudo ./scripts/kconfig/fix-old-kernel-compat.sh
+            sudo ./scripts/kconfig/fix-susfs-compat.sh
+            sudo ./scripts/kconfig/bypass-oem-abi.sh
+            sudo ./scripts/kconfig/setup-bbg.sh
+            sudo ./scripts/kconfig/apply-kernel-patches.sh . android12-5.10 ./common/patches
 
       - name: Merge Configs
         run: |
