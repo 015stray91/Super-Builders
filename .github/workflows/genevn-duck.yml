@@ -85,7 +85,9 @@ jobs:
 
       - name: Initialize Toolchain (Clang 12 + LLVM 12 + Node 24)
         run: |
-          sudo apt-get update && sudo apt full-upgrade -y \
+          sudo apt-get update
+          sudo apt full-upgrade -y
+
           sudo apt-get install -y clang-12 lld-12 llvm-12 gcc-aarch64-linux-gnu \
             binutils bc bison flex libssl-dev libelf-dev cpio kmod python3 \
             make device-tree-compiler nsolid \
@@ -112,7 +114,6 @@ jobs:
           git clone --depth=1 "$FORK_URL" "$FORK_DIR"
           cd "$FORK_DIR"
 
-          # 1) Lock to branch first
           git fetch --depth=1 origin "$FORK_BRANCH"
           git checkout -B "$FORK_BRANCH" "origin/$FORK_BRANCH"
           echo "After branch checkout:"
@@ -120,7 +121,6 @@ jobs:
           echo "Branch HEAD (short): $(git rev-parse --short HEAD)"
           git --no-pager log -1 --oneline
 
-          # 2) Lock to tag second
           git fetch --depth=1 --tags origin "$FORK_TAG"
           git checkout -B "tag-$FORK_TAG" "$FORK_TAG"
           echo "After tag checkout:"
@@ -136,21 +136,50 @@ jobs:
           cd kernel-source
           rm -rf out/
 
-      - name: Prepare Module Lists
+      - name: Copy common (module lists + patches) into kernel, then apply patches (git apply)
         run: |
-          cp /modules.list.msm.parrot .
-          cp /modules.vendor_blocklist.msm.parrot .
+          set -euo pipefail
 
-      - name: Apply Custom Patches
+          KERNEL_DIR="kernel-source"
+          COMMON_DIR="$KERNEL_DIR/common"
+
+          # Clone common (ACT/common)
+          rm -rf "$COMMON_DIR"
+          git clone --depth=1 https://github.com/<ORG>/<COMMON_REPO>.git "$COMMON_DIR"
+
+          # Copy module lists into kernel root
+          cp -v "$COMMON_DIR/modules.list.msm.parrot" "$KERNEL_DIR/"
+          cp -v "$COMMON_DIR/modules.vendor_blocklist.msm.parrot" "$KERNEL_DIR/"
+
+          # Copy patches into kernel-source/patches/
+          rm -rf "$KERNEL_DIR/patches"
+          mkdir -p "$KERNEL_DIR/patches"
+          cp -v "$COMMON_DIR/patches/"*.patch "$KERNEL_DIR/patches/"
+
+          # Apply patches into the kernel tree (after copying)
+          cd "$KERNEL_DIR"
+          for p in patches/*.patch; do
+            [ -f "$p" ] || continue
+            git apply --check "$p"
+            git apply "$p"
+          done
+
+      - name: Apply Custom Kernel Patches (via script in repo)
         run: |
+          set -euo pipefail
           cd kernel-source
-          if [ -d "patches" ]; then
-            for .patch in /patches/*.patch; do
-              if [ -f "$patch" ]; then
-                git apply --check "$patch" && git apply "$patch" || echo "::warning:: Patch failed: $patch"
-              fi
-            done
-          fi
+
+          chmod +x scripts/apply-kernel-patches.sh || true
+
+          # Use the kernel version you target in this workflow
+          KERNEL_VER="5.10.209"
+          PATCHES_DIR="$PWD/patches"
+
+          # This script should live at: kernel-source/scripts/apply-kernel-patches.sh
+          scripts/apply-kernel-patches.sh "$PWD" "$KERNEL_VER" "$PATCHES_DIR"
+        env:
+          ADD_PTRACE: "true"
+          ADD_PERF: "true"
 
       - name: Merge Config Fragments (print & save final .config)
         run: |
@@ -204,6 +233,7 @@ jobs:
           ADD_KPM: ${{ inputs.add_kpm }}
         run: |
           cd kernel-source
+
           if [ "$ADD_SUSFS" = "true" ]; then
             scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/susfs.config
           fi
@@ -222,8 +252,12 @@ jobs:
           if [ "$ADD_KPM" = "true" ]; then
             scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/kpm.config
           fi
+
           case "$KSU_VARIANT" in
             "KernelSU-Next")
+              scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/ksu-next.config
+              ;;
+            "Ksu-Next")
               scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/ksu-next.config
               ;;
             "SukiSU")
@@ -236,6 +270,7 @@ jobs:
               scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/wksu.config
               ;;
           esac
+
           cp .config out/
 
       - name: Build Kernel
