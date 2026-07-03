@@ -14,18 +14,18 @@ on:
         options:
           - "android12-5.10.209 (2024-05)"
       quick_target:
-        description: "Quick select — type e.g. android15-6.6.58 (overrides dropdown)"
+        description: "Quick select"
         type: string
         default: ""
       ksu_variant:
         description: "KernelSU variant"
-        type: boolean
+        type: choice
         options:
-           -Ksu-next
+          - KernelSU-Next
           - SukiSU
-          - ReSukiS
+          - ReSukiSU
           - WKSU
-        default: "Ksu-Next"
+        default: "KernelSU-Next"
       add_susfs:
         description: "Add SUSFS"
         type: boolean
@@ -51,7 +51,7 @@ on:
         type: boolean
         default: true
       sukisu_commit:
-        description: "KSU commit override (empty = latest)"
+        description: "KSU commit override"
         type: string
         default: ""
 
@@ -61,15 +61,6 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Parse Target Details
-        id: parse
-        run: |
-          echo "android_version=android12" >> "$GITHUB_OUTPUT"
-          echo "kernel_version=5.10" >> "$GITHUB_OUTPUT"
-          echo "sub_level=209" >> "$GITHUB_OUTPUT"
-          echo "os_patch_level=2024-05" >> "$GITHUB_OUTPUT"
-          echo "codename=Genevn" >> "$GITHUB_OUTPUT"
-
       - name: Free Disk Space
         uses: endersonmenezes/free-disk-space@v3
         with:
@@ -78,114 +69,42 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v5
-        with:
-          sparse-checkout: |
-            device-profiles.json
-          sparse-checkout-cone-mode: false
 
-      - name: Initialize Toolchain (Clang 12 + LLVM 12 + Node 24)
+      - name: Initialize Toolchain
         run: |
           sudo apt-get update
-          sudo apt upgrade -y
-
           sudo apt-get install -y clang-12 lld-12 llvm-12 gcc-aarch64-linux-gnu \
             binutils bc bison flex libssl-dev libelf-dev cpio kmod python3 \
-            make device-tree-compiler patch \
-            libncurses5 libncursesw5 libncurses-dev
+            make device-tree-compiler
 
-          curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
-          sudo apt-get install -y nodejs
-
-          node -v
-          npm -v
-          dtc -v || true
-
-      - name: Clone Kernel Source (LOCK fork branch + tag + verify HEADs)
+      - name: Clone Kernel Source
         run: |
-          set -euo pipefail
+          git clone --depth=1 https://github.com/015stray91/kernel-msm-1.git kernel-source
+          cd kernel-source
+          git clone --depth=1 https://android.googlesource.com/kernel/common common
 
-          FORK_URL="https://github.com/015stray91/kernel-msm-1.git"
-          FORK_DIR="kernel-source"
-
-          FORK_BRANCH="android-14-release-u1tgns34.42.86-2-32"
-          FORK_TAG="MMI-U1TGNS34.42-86-2-32"
-
-          rm -rf "$FORK_DIR"
-          git clone --depth=1 "$FORK_URL" "$FORK_DIR"
-          cd "$FORK_DIR"
-
-          git fetch --depth=1 origin "$FORK_BRANCH"
-          git checkout -B "$FORK_BRANCH" "origin/$FORK_BRANCH"
-          echo "After branch checkout:"
-          git status -sb
-          echo "Branch HEAD (short): $(git rev-parse --short HEAD)"
-          git --no-pager log -1 --oneline
-
-          git fetch --depth=1 --tags origin "$FORK_TAG"
-          git checkout -B "tag-$FORK_TAG" "$FORK_TAG"
-          echo "After tag checkout:"
-          git status -sb
-          echo "Tag HEAD (short): $(git rev-parse --short HEAD)"
-          git --no-pager log -1 --oneline
-
-          echo "Tag points to (commit):"
-          git rev-list -n 1 "$FORK_TAG"
-
-      - name: Clean Output Directory
+      - name: Prepare Patches & Module Lists
         run: |
           cd kernel-source
-          rm -rf out/
+          mkdir -p patches
+          cp ../common/patches/*.patch patches/
+          cp ../modules.list .
+          cp ../modules.blocklist .
+          cp ../modules.vendor_blocklist .
+          cp ../modules.list.msm.parrot .
 
-      - name: Copy common (module lists + patches) into kernel, then apply patches (git apply)
+      - name: Run Compatibility Scripts
         run: |
-          set -euo pipefail
-
-          KERNEL_DIR="kernel-source"
-          COMMON_DIR="$KERNEL_DIR/common"
-
-          # Clone common (ACT/common)
-          rm -rf "$COMMON_DIR"
-          git clone --depth=1 https://github.com/<ORG>/<COMMON_REPO>.git "$COMMON_DIR"
-
-          # Copy module lists into kernel root
-          cp -v "$COMMON_DIR/modules.list.msm.parrot" "$KERNEL_DIR/"
-          cp -v "$COMMON_DIR/modules.vendor_blocklist.msm.parrot" "$KERNEL_DIR/"
-
-          # Copy patches into kernel-source/patches/
-          rm -rf "$KERNEL_DIR/patches"
-          mkdir -p "$KERNEL_DIR/patches"
-          cp -v "$COMMON_DIR/patches/"*.patch "$KERNEL_DIR/patches/"
-
-          # Apply patches into the kernel tree (after copying)
-          cd "$KERNEL_DIR"
-          for p in patches/*.patch; do
-            [ -f "$p" ] || continue
-            git apply --check "$p"
-            git apply "$p"
-          done
-
-      - name: Apply Custom Kernel Patches (via script in repo)
-        run: |
-          set -euo pipefail
           cd kernel-source
+          chmod +x scripts/kconfig/*.sh
+          ./scripts/kconfig/fix-old-kernel-compat.sh
+          ./scripts/kconfig/fix-susfs-compat.sh
+          ./scripts/kconfig/bypass-oem-abi.sh
+          ./scripts/kconfig/setup-bbg.sh
 
-          chmod +x scripts/apply-kernel-patches.sh || true
-
-          # Use the kernel version you target in this workflow
-          KERNEL_VER="5.10.209"
-          PATCHES_DIR="$PWD/patches"
-
-          # This script should live at: kernel-source/scripts/apply-kernel-patches.sh
-          scripts/apply-kernel-patches.sh "$PWD" "$KERNEL_VER" "$PATCHES_DIR"
-        env:
-          ADD_PTRACE: "true"
-          ADD_PERF: "true"
-
-      - name: Merge Config Fragments (print & save final .config)
+      - name: Merge Configs
         run: |
-          set -euo pipefail
           cd kernel-source
-
           ./scripts/kconfig/merge_config.sh \
             arch/arm64/configs/ksu-nethunter.defconfig \
             build.config.gki_kprobes \
@@ -206,22 +125,6 @@ jobs:
             arch/arm64/configs/vendor/ext_config/moto-parrot.config \
             arch/arm64/configs/vendor/ext_config/moto-parrot-genevn.config
 
-          echo "===== .config (head) ====="
-          sed -n '1,120p' .config || true
-
-          echo "===== .config (full) ====="
-          cat .config
-
-          mkdir -p out
-          cp .config out/final.config
-
-      - name: Upload final .config
-        uses: actions/upload-artifact@v4
-        with:
-          name: kernel-final-config
-          path: kernel-source/out/final.config
-          if-no-files-found: error
-
       - name: Apply Feature Toggles
         env:
           KSU_VARIANT: ${{ inputs.ksu_variant }}
@@ -233,44 +136,18 @@ jobs:
           ADD_KPM: ${{ inputs.add_kpm }}
         run: |
           cd kernel-source
-
-          if [ "$ADD_SUSFS" = "true" ]; then
-            scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/susfs.config
-          fi
-          if [ "$ADD_ZEROMOUNT" = "true" ]; then
-            scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/zeromount.config
-          fi
-          if [ "$ADD_ZRAM" = "true" ]; then
-            scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/zram.config
-          fi
-          if [ "$ADD_BBG" = "true" ]; then
-            scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/bbg.config
-          fi
-          if [ "$ADD_OVERLAYFS" = "true" ]; then
-            scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/overlayfs.config
-          fi
-          if [ "$ADD_KPM" = "true" ]; then
-            scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/kpm.config
-          fi
-
+          [[ "$ADD_SUSFS" == "true" ]] && scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/susfs.config
+          [[ "$ADD_ZEROMOUNT" == "true" ]] && scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/zeromount.config
+          [[ "$ADD_ZRAM" == "true" ]] && scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/zram.config
+          [[ "$ADD_BBG" == "true" ]] && scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/bbg.config
+          [[ "$ADD_OVERLAYFS" == "true" ]] && scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/overlayfs.config
+          [[ "$ADD_KPM" == "true" ]] && scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/kpm.config
           case "$KSU_VARIANT" in
-            "KernelSU-Next")
-              scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/ksu-next.config
-              ;;
-            "Ksu-Next")
-              scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/ksu-next.config
-              ;;
-            "SukiSU")
-              scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/sukisu.config
-              ;;
-            "ReSukiSU")
-              scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/resukisu.config
-              ;;
-            "WKSU")
-              scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/wksu.config
-              ;;
+            "KernelSU-Next") scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/ksu-next.config ;;
+            "SukiSU") scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/sukisu.config ;;
+            "ReSukiSU") scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/resukisu.config ;;
+            "WKSU") scripts/kconfig/merge_config.sh .config arch/arm64/configs/vendor/ext_config/wksu.config ;;
           esac
-
           cp .config out/
 
       - name: Build Kernel
@@ -288,16 +165,7 @@ jobs:
           export OBJCOPY="llvm-objcopy-12"
           export OBJDUMP="llvm-objdump-12"
           export STRIP="llvm-strip-12"
-
-          make O=out \
-            ARCH=arm64 \
-            CC=clang-12 \
-            LD=ld.lld-12 \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
-            LLVM=1 \
-            LLVM_IAS=1 \
-            Image.gz \
-            -j$(nproc --all) || exit 1
+          make O=out ARCH=arm64 CC=clang-12 LD=ld.lld-12 CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 Image.gz -j$(nproc) || exit 1
 
       - name: Package Kernel
         run: |
