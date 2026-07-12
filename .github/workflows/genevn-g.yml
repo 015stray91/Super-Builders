@@ -56,17 +56,19 @@ jobs:
 
 
 
-      - name: Parse Target Profile Details
-        id: parse
-        run: |
+          - name: Parse Target Profile Details
+          id: parse
+          run: |
           TARGET_KEY="${{ inputs.kernel_target }}"
           JSON_FILE="device-profiles.json"
           if [ ! -f "$JSON_FILE" ]; then echo "ERROR: device-profiles.json missing!" && exit 1; fi
           
-          echo "source=$(jq -r ".$TARGET_KEY.source" $JSON_FILE)" >> $GITHUB_OUTPUT
-          echo "branch=$(jq -r ".$TARGET_KEY.branch" $JSON_FILE)" >> $GITHUB_OUTPUT
-          echo "defconfig=$(jq -r ".$TARGET_KEY.defconfig" $JSON_FILE)" >> $GITHUB_OUTPUT
-          echo "debug_config=$(jq -r ".$TARGET_KEY.debug_config" $JSON_FILE)" >> $GITHUB_OUTPUT
+          # Added the '.devices.' selector to drill down safely past your parent object block
+          echo "source=$(jq -r ".devices.$TARGET_KEY.source" $JSON_FILE)" >> $GITHUB_OUTPUT
+          echo "branch=$(jq -r ".devices.$TARGET_KEY.branch" $JSON_FILE)" >> $GITHUB_OUTPUT
+          echo "defconfig=$(jq -r ".devices.$TARGET_KEY.defconfig" $JSON_FILE)" >> $GITHUB_OUTPUT
+          echo "debug_config=$(jq -r ".devices.$TARGET_KEY.debug_config" $JSON_FILE)" >> $GITHUB_OUTPUT
+
 
       - name: Clone Kernel Source
         run: |
