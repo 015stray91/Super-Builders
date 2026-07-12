@@ -30,21 +30,17 @@
         "compiler_info": "Android (11368308, +pgo, +bolt, +lto, +mlgo, based on r510928) clang version 18.0.0"
       }
     },
-  {
-  "genevn_a12": {
-    "name": "Moto G Stylus 5G 2023",
-    "codename": "genevn",
-    "android_version": "android12",
-    "kernel_version": "5.10",
-    "sub_level": "240",
-    "os_patch_level": "2026-05",
-    "source": "https://github.com/015stray91/kernel-msm-1.git",
-    "branch": "android-14-release-u1tgns34.42-86-2-32",
-    "defconfig": "arch/arm64/configsksu-nh.defconfig",
-    "debug_config": "arch/arm64/configs/vendor/ext_config/debug_parrot_genevn.config"
-  }
-}
-
+    "genevn_a12": {
+      "name": "Moto G Stylus 5G 2023",
+      "codename": "genevn",
+      "android_version": "android12",
+      "kernel_version": "5.10",
+      "sub_level": "240",
+      "os_patch_level": "2026-05",
+      "source": "https://github.com/015stray91/kernel-msm-1.git",
+      "branch": "android-14-release-u1tgns34.42-86-2-32",
+      "defconfig": "arch/arm64/configs/ksu-nh.defconfig",
+      "debug_config": "arch/arm64/configs/vendor/ext_config/debug_parrot_genevn.config"
     }
   },
   "_template": {
@@ -64,3 +60,4 @@
     "_note": "To add a new device: 1) Get stock boot.img, 2) Run: strings boot.img | grep 'Linux version', 3) Copy values here"
   }
 }
+
