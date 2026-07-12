@@ -70,7 +70,7 @@ jobs:
 
       - name: Clone Kernel Source
         run: |
-          git clone --depth=1 -b ${{ steps.parse.outputs.branch }} ${{ steps.parse.outputs.source }} kernel-msm-1
+          git clone --depth=1 https://github.com/015stray91/kernel-msm-1.git -b ${{ steps.parse.outputs.branch }} ${{ steps.parse.outputs.source }} kernel-msm-1
           cd kernel-msm-1
           git clone --depth=1  https://android.googlesource.com/kernel/common common
 
