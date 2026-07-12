@@ -61,7 +61,7 @@ jobs:
           git clone --depth=1 https://android.googlesource.com/kernel/common common
 
           ./scripts/kconfig/merge_config.sh \
-            arch/arm64/configs/gki_defconfig \
+            arch/arm64/configs/ksu-nh.defconfig \
             build.config.gki_kprobes \
             build.config.aarch64 \
             build.config.gki_kprobes.aarch64 \
@@ -80,7 +80,7 @@ jobs:
             arch/arm64/configs/vendor/ext_config/moto-parrot-gki.config \
             arch/arm64/configs/vendor/ext_config/debug-parrot.config \
             arch/arm64/configs/vendor/ext_config/moto-parrot.config \
-            arch/arm64/configs/vendor/ext_config/factory-parrot.config
+            arch/arm64/configs/vendor/ext_config/debug-parrot.config
 
           cp .config out/
 
@@ -93,11 +93,7 @@ jobs:
             LLVM_IAS=1 \
             -j$(nproc --all)
 
-      - name: Package Kernel via Boot Image Repack
-        run: |
-          cd kernel-source/packages
-          ./build_boot_image.sh ../out/arch/arm64/boot/Image.gz
-          cp ../out/boot.img ../../Genevn-Kernel-Flashable.img
+ 
 
       - name: Push to Artifacts
         uses: actions/upload-artifact@v4
