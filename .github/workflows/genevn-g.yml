@@ -8,14 +8,19 @@ on:
   workflow_dispatch:
     inputs:
       kernel_target:
-        description: "Kernel target"
+        description: "Target matching device-profiles.json"
         type: choice
-        default: "android12-5.10.209 (2024-05)"
-        options: ["android12-5.10.209 (2024-05)"]
+        default: "genevn_a12"
+        options:
+          - "genevn_a12"
       ksu_variant:
         description: "KernelSU variant"
         type: choice
-        options: [KernelSU-Next, SukiSU, ReSukiSU, WKSU]
+        options:
+          - KernelSU-Next
+          - SukiSU
+          - ReSukiSU
+          - WKSU
         default: "KernelSU-Next"
       add_susfs: { type: boolean, default: true }
       add_zeromount: { type: boolean, default: true }
@@ -23,81 +28,144 @@ on:
       add_bbg: { type: boolean, default: true }
       add_overlayfs_support: { type: boolean, default: true }
       add_kpm: { type: boolean, default: true }
-      sukisu_commit: { type: string, default: "" }
 
 jobs:
   build:
     name: "Build Custom Kernel - Genevn"
     runs-on: ubuntu-22.04
-    
-    steps:
-      - name: Parse Target Details
-        id: parse
-        run: echo "codename=Genevn" >> "$GITHUB_OUTPUT"
 
+    steps:
       - name: Free Disk Space
         uses: endersonmenezes/free-disk-space@v3
         with:
           remove_android: true
           remove_tool_cache: true
 
-      - uses: actions/checkout@v5
-        with:
-          sparse-checkout: device-profiles.json
-          sparse-checkout-cone-mode: false
+      - name: Checkout Builder Meta Layout
+        uses: actions/checkout@v4
 
-      - name: Initialize Toolchain Environment
+      - name: Initialize Toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang lld llvm gcc-aarch64-linux-gnu binutils bc bison flex libssl-dev libelf-dev cpio kmod python3
+          sudo apt-get install -y clang-12 lld-12 llvm-12 gcc-aarch64-linux-gnu \
+            binutils bc bison flex libssl-dev libelf-dev cpio kmod python3 \
+            make device-tree-compiler gcc-arm-linux-gnueabi zip jq
 
-      - name: Compile Genevn Kernel
+      - name: Parse Target Profile Details
+        id: parse
+        run: |
+          TARGET_KEY="${{ inputs.kernel_target }}"
+          JSON_FILE="device-profiles.json"
+          if [ ! -f "$JSON_FILE" ]; then echo "ERROR: device-profiles.json missing!" && exit 1; fi
+          
+          echo "source=$(jq -r ".$TARGET_KEY.source" $JSON_FILE)" >> $GITHUB_OUTPUT
+          echo "branch=$(jq -r ".$TARGET_KEY.branch" $JSON_FILE)" >> $GITHUB_OUTPUT
+          echo "defconfig=$(jq -r ".$TARGET_KEY.defconfig" $JSON_FILE)" >> $GITHUB_OUTPUT
+          echo "debug_config=$(jq -r ".$TARGET_KEY.debug_config" $JSON_FILE)" >> $GITHUB_OUTPUT
+
+      - name: Clone Kernel Source
+        run: |
+          git clone --depth=1 -b ${{ steps.parse.outputs.branch }} ${{ steps.parse.outputs.source }} kernel-msm-1
+          cd kernel-msm-1
+          git clone --depth=1 https://googlesource.com common
+
+      - name: Merge Configs & Apply Feature Toggles
         env:
           KSU_VARIANT: ${{ inputs.ksu_variant }}
-          CODENAME: ${{ steps.parse.outputs.codename }}
+          ADD_SUSFS: ${{ inputs.add_susfs }}
+          ADD_ZEROMOUNT: ${{ inputs.add_zeromount }}
+          ADD_ZRAM: ${{ inputs.add_zram }}
+          ADD_BBG: ${{ inputs.add_bbg }}
+          ADD_OVERLAYFS: ${{ inputs.add_overlayfs_support }}
+          ADD_KPM: ${{ inputs.add_kpm }}
         run: |
-          git clone --depth=1 https://github.com/015stray91/kernel-msm-1.git kernel-source
-          cd kernel-source
-          git clone --depth=1 https://android.googlesource.com/kernel/common common
+          cd kernel-msm-1
+          export ARCH=arm64
+          export SUBARCH=arm64
 
-          ./scripts/kconfig/merge_config.sh \
-            arch/arm64/configs/ksu-nh.defconfig \
-            build.config.gki_kprobes \
-            build.config.aarch64 \
-            build.config.gki_kprobes.aarch64 \
-            build.config.allmodconfig \
-            build.config.allmodconfig.aarch64 \
-            build.config.moto \
-            build.config.msm.common \
-            build.config.msm.gki \
-            build.config.common \
-            build.config.db845c \
-            build.config.msm.parrot \
-            arch/arm64/configs/vendor/parrot_consolidate.config \
-            arch/arm64/configs/vendor/parrot_GKI.config \
-            arch/arm64/configs/vendor/ext_config/debug-parrot-genevn.config \
-            arch/arm64/configs/vendor/ext_config/moto-parrot-genevn.config \
-            arch/arm64/configs/vendor/ext_config/moto-parrot-gki.config \
-            arch/arm64/configs/vendor/ext_config/debug-parrot.config \
-            arch/arm64/configs/vendor/ext_config/moto-parrot.config \
-            arch/arm64/configs/vendor/ext_config/debug-parrot.config
+          mkdir -p out
+          CONFIG_LIST=""
 
-          cp .config out/
+          # 1. Base vendor arrays go down first
+          for cfg in \
+            "build.config.gki_kprobes" "build.config.aarch64" "build.config.gki_kprobes.aarch64" \
+            "build.config.allmodconfig" "build.config.allmodconfig.aarch64" "build.config.moto" \
+            "build.config.msm.common" "build.config.msm.gki" "build.config.common" "build.config.db845c" \
+            "build.config.msm.parrot" "arch/arm64/configs/vendor/parrot_GKI.config" \
+            "arch/arm64/configs/vendor/ext_config/moto-parrot-gki.config" \
+            "arch/arm64/configs/vendor/ext_config/debug-parrot.config" \
+            "arch/arm64/configs/vendor/ext_config/moto-parrot.config" \
+            "arch/arm64/configs/vendor/ext_config/moto-parrot-genevn.config"; do
+            if [ -f "$cfg" ]; then CONFIG_LIST="$CONFIG_LIST $cfg"; fi
+          done
 
-          make O=out \
-            ARCH=arm64 \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
-            CC=clang \
-            LLVM=1 \
-            LLVM_IAS=1 \
-            -j$(nproc --all)
+          # 2. Layer your custom NetHunter / KSU base config (ksu-nh.defconfig) over them
+          if [ -f "${{ steps.parse.outputs.defconfig }}" ]; then
+            CONFIG_LIST="$CONFIG_LIST ${{ steps.parse.outputs.defconfig }}"
+          fi
 
- 
+          # 3. Layer your custom debug setup (debug_parrot_genevn.config) over the defconfig
+          if [ -f "${{ steps.parse.outputs.debug_config }}" ]; then
+            CONFIG_LIST="$CONFIG_LIST ${{ steps.parse.outputs.debug_config }}"
+          fi
 
-      - name: Push to Artifacts
+          # 4. Optional runtime feature toggles go dead-last to lock overrides
+          [[ "$ADD_SUSFS" == "true" && -f "arch/arm64/configs/vendor/ext_config/susfs.config" ]] && CONFIG_LIST="$CONFIG_LIST arch/arm64/configs/vendor/ext_config/susfs.config"
+          [[ "$ADD_ZEROMOUNT" == "true" && -f "arch/arm64/configs/vendor/ext_config/zeromount.config" ]] && CONFIG_LIST="$CONFIG_LIST arch/arm64/configs/vendor/ext_config/zeromount.config"
+          [[ "$ADD_ZRAM" == "true" && -f "arch/arm64/configs/vendor/ext_config/zram.config" ]] && CONFIG_LIST="$CONFIG_LIST arch/arm64/configs/vendor/ext_config/zram.config"
+          [[ "$ADD_BBG" == "true" && -f "arch/arm64/configs/vendor/ext_config/bbg.config" ]] && CONFIG_LIST="$CONFIG_LIST arch/arm64/configs/vendor/ext_config/bbg.config"
+          [[ "$ADD_OVERLAYFS" == "true" && -f "arch/arm64/configs/vendor/ext_config/overlayfs.config" ]] && CONFIG_LIST="$CONFIG_LIST arch/arm64/configs/vendor/ext_config/overlayfs.config"
+          [[ "$ADD_KPM" == "true" && -f "arch/arm64/configs/vendor/ext_config/kpm.config" ]] && CONFIG_LIST="$CONFIG_LIST arch/arm64/configs/vendor/ext_config/kpm.config"
+
+          case "$KSU_VARIANT" in
+            "KernelSU-Next") [[ -f "arch/arm64/configs/vendor/ext_config/ksu-next.config" ]] && CONFIG_LIST="$CONFIG_LIST arch/arm64/configs/vendor/ext_config/ksu-next.config" ;;
+            "SukiSU")        [[ -f "arch/arm64/configs/vendor/ext_config/sukisu.config" ]]   && CONFIG_LIST="$CONFIG_LIST arch/arm64/configs/vendor/ext_config/sukisu.config" ;;
+            "ReSukiSU")      [[ -f "arch/arm64/configs/vendor/ext_config/resukisu.config" ]] && CONFIG_LIST="$CONFIG_LIST arch/arm64/configs/vendor/ext_config/resukisu.config" ;;
+            "WKSU")          [[ -f "arch/arm64/configs/vendor/ext_config/wksu.config" ]]     && CONFIG_LIST="$CONFIG_LIST arch/arm64/configs/vendor/ext_config/wksu.config" ;;
+          esac
+
+          ./scripts/kconfig/merge_config.sh -O out $CONFIG_LIST
+          make O=out olddefconfig
+
+      - name: Build Kernel
+        run: |
+          cd kernel-msm-1
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CROSS_COMPILE="aarch64-linux-gnu-"
+          export CROSS_COMPILE_COMPAT="arm-linux-gnueabi-"
+          export LLVM=1
+          export LLVM_IAS=1
+          export CC="clang-12"
+          export LD="ld.lld-12"
+          export AR="llvm-ar-12"
+          export NM="llvm-nm-12"
+          export OBJCOPY="llvm-objcopy-12"
+          export OBJDUMP="llvm-objdump-12"
+          export STRIP="llvm-strip-12"
+
+          # 100% accurate system values mapped directly from your live 5.10.240 screenshot data
+          export KBUILD_BUILD_USER="build-user"
+          export KBUILD_BUILD_HOST="build-host"
+          export LOCALVERSION="-android12-9-00006-g25161a557b20-ab14744618"
+
+          make O=out ARCH=arm64 CC=clang-12 LD=ld.lld-12 CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 Image.gz -j$(nproc --all) || exit 1
+
+      - name: Package Kernel via Personal AnyKernel纯包
+        run: |
+          git clone --depth=1 https://github.com anykernel-workspace
+          rm -rf anykernel-workspace/.git
+          
+          # Drop binary to installer root without ramdisk extraction
+          cp kernel-msm-1/out/arch/arm64/boot/Image.gz anykernel-workspace/
+          
+          cd anykernel-workspace
+          zip -r9 ../Genevn-Kernel-Flashable.zip *
+
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Genevn-Boot-Image
-          path: Genevn-Kernel-Flashable.img
+          name: Genevn-Flashable-Package
+          path: Genevn-Kernel-Flashable.zip
+          compression-level: 9
           overwrite: true
