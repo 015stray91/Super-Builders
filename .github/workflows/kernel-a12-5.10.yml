@@ -50,9 +50,11 @@ on:
         description: "Device profile (generic = no identity spoofing)"
         type: choice
         options:
-          - genven
+          - Akernel12-5.10
+          - genevn
           - lake
-        default: "lake"
+        default: "Akernel12-5.10"
+        
   workflow_call:
     inputs:
       ksu_variant:
