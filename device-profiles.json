@@ -30,7 +30,7 @@
         "compiler_info": "Android (11368308, +pgo, +bolt, +lto, +mlgo, based on r510928) clang version 18.0.0"
       }
     },
-    "genevn_a12": {
+    "genevn-g": {
       "name": "Moto G Stylus 5G 2023",
       "codename": "genevn",
       "android_version": "android12",
