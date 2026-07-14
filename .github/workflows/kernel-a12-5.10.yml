@@ -81,7 +81,7 @@ on:
         default: ""
       device_codename:
         type: string
-        default: "lake"
+        default: "android12-5.10"
 
 jobs:
   download-dependencies:
@@ -128,7 +128,7 @@ jobs:
           - sub_level: "237"
             os_patch_level: "2025-06"
           - sub_level: "240"
-            os_patch_level: "2025-09"
+            os_patch_level: "2026-05"
           - sub_level: "246"
             os_patch_level: "2025-12"
     uses: ./.github/workflows/build-sukisu.yml
@@ -184,7 +184,7 @@ jobs:
           - sub_level: "237"
             os_patch_level: "2025-06"
           - sub_level: "240"
-            os_patch_level: "2025-09"
+            os_patch_level: "2026-05"
           - sub_level: "246"
             os_patch_level: "2025-12"
     uses: ./.github/workflows/build-ksu-next.yml
@@ -240,7 +240,7 @@ jobs:
           - sub_level: "237"
             os_patch_level: "2025-06"
           - sub_level: "240"
-            os_patch_level: "2025-09"
+            os_patch_level: "2026-05"
           - sub_level: "246"
             os_patch_level: "2025-12"
     uses: ./.github/workflows/build-resukisu.yml
@@ -296,7 +296,7 @@ jobs:
           - sub_level: "237"
             os_patch_level: "2025-06"
           - sub_level: "240"
-            os_patch_level: "2025-09"
+            os_patch_level: "2026-05"
           - sub_level: "246"
             os_patch_level: "2025-12"
     uses: ./.github/workflows/build-wksu.yml
