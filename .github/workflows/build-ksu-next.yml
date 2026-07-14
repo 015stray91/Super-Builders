@@ -15,7 +15,7 @@ on:
       os_patch_level:
         required: true
         type: string
-      device_codename:
+      device_codename: genevn
         required: true
         type: string
       sukisu_commit:
