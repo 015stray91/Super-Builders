@@ -3,55 +3,55 @@ name: Custom Kernel Compiler
 on:
   workflow_call:
     inputs:
-      android_version:
+      android_version: 12
+      required: true
+      type: string
+      kernel_version: 5.10
+      required: true
+      type: string
+      sub_level: 240
+      required: true
+      type: string
+      os_patch_level: 2026-05
+      required: true
+      type: string
+      device_codename: Genevn
+      required: true
+      type: string
+    sukisu_commit:
+      required: false
+        type: string
+         default: 'main'
+v      add_susfs:
         required: true
-        type: string
-      kernel_version:
+        type: boolean
+        default: false
+       add_zeromount:
         required: true
-        type: string
-      sub_level:
+        type: boolean
+        default: false
+       add_zram:
         required: true
-        type: string
-      os_patch_level:
+        type: boolean
+        default: false
+        add_bbg:
         required: true
-        type: string
-      device_codename: genevn
+        type: boolean
+        default: false
+        add_overlayfs_support:
         required: true
-        type: string
-      sukisu_commit:
-        required: false
-        type: string
-        default: 'main'
-      add_susfs:
-        required: false
         type: boolean
         default: false
-      add_zeromount:
-        required: false
+        add_kpm:
+        required: true
         type: boolean
         default: false
-      add_zram:
-        required: false
+        add_ptrace_fix:
+        required: true
         type: boolean
         default: false
-      add_bbg:
-        required: false
-        type: boolean
-        default: false
-      add_overlayfs_support:
-        required: false
-        type: boolean
-        default: false
-      add_kpm:
-        required: false
-        type: boolean
-        default: false
-      add_ptrace_fix:
-        required: false
-        type: boolean
-        default: false
-      add_perf_patches:
-        required: false
+        add_perf_patches:
+        required: true
         type: boolean
         default: false
 
@@ -61,7 +61,7 @@ env:
 
 jobs:
   compile:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
     - name: Free Disk Space
       uses: endersonmenezes/free-disk-space@v3
@@ -95,13 +95,13 @@ jobs:
 
     - name: Fetch Clean AnyKernel3 Base Template
       run: |
-        git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git "$GITHUB_WORKSPACE/AnyKernel3"
-        rm -rf "$GITHUB_WORKSPACE/AnyKernel3/.git"
+        git clone --depth=1 "https://github.com/015stray91/Genevn-sm6450_AnyKernel.git"
 
     - name: Sync Android Common Kernel Source Tree
       run: |
-        mkdir -p "$GITHUB_WORKSPACE/kernel"
+        mkdir -p "$GITHUB_WORKSPACE/kernel-msm"
         cd "$GITHUB_WORKSPACE/kernel"
+        mkdir b the $GITHUB_WORKSPACE/kernel/common
         git clone --depth=1 -b android-${{ inputs.android_version }}-${{ inputs.kernel_version }} https://android.googlesource.com/kernel/common common
 
     - name: Integrate KernelSU-Next Submodule Source Tree
