@@ -40,9 +40,10 @@
       "source": "https://github.com/015stray91/kernel-msm-1.git",
       "branch": "android-14-release-u1tgns34.42-86-2-32",
       "defconfig": "arch/arm64/configs/ksu-nh.defconfig",
-      "debug_config": "arch/arm64/configs/vendor/ext_config/debug_parrot_genevn.config"
-    }
-  },
+      "debug_config": "arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config"
+      "ksu_nh.config":"ksu_patches","android_common","base.config=ksu_nh.defconfig","scripts/kconfig/merge_config.sh", 
+      "make=arch/arm64/boot/out/ksu_nh.config"
+
   "_template": {
     "name": "Device Name",
     "codename": "codename",
