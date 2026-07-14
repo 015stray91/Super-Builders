@@ -50,7 +50,7 @@ on:
         description: "Device profile (generic = no identity spoofing)"
         type: choice
         options:
-          - generic
+          - genven
           - lake
         default: "lake"
   workflow_call:
