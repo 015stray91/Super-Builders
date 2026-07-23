@@ -1,8 +1,6 @@
 name: Custom Kernel Compiler
-
-on:
-  workflow_call:
-    inputs:
+on:  workflow_call
+inputs:
       android_version: 12
       required: true
       type: string
