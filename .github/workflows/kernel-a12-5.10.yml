@@ -7,6 +7,19 @@ permissions:
 on:
   workflow_dispatch:
     inputs:
+     - name: GKI Kernel Module Build Action
+      You may pin to the exact commit or the version.
+   uses: feicong/android-kernel-build-action@d8375ba3f3dcaa294fbaffebb5693fd4e16e7f9e
+  uses: feicong/android-kernel-build-action@v1
+  with:
+    # Specify the Android kernel version and tag to build for (e.g., android13-5.15).
+    tag default is android12-5.10
+    # Specify the architecture to build for (e.g., aarch64 or x86_64).
+    arch: aarch64
+    # Specify the name of the kernel module artifact.
+    module-path: 
+    # Specify the name of the kernel module.
+    module-name: 
       ksu_variant:
         description: "KernelSU variant"
         type: choice
