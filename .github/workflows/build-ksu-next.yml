@@ -18,11 +18,11 @@ on:
       device_codename: Genevn
       required: true
       type: string
-    sukisu_commit:
-      required: false
-        type: string
-         default: 'main'
-v      add_susfs:
+      sukisu_commit:
+       required: false
+      type: string  
+      default: 'main'
+      add_susfs:
         required: true
         type: boolean
         default: false
