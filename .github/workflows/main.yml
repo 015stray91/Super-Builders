@@ -64,9 +64,10 @@ on:
         description: "Device profile (generic = no identity spoofing)"
         type: choice
         options:
-          - generic
+          - genevn
           - lake
-        default: "lake"
+          - android
+        default: "android"
 
 jobs:
   build-a12-5-10:
