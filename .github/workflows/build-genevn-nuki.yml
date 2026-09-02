@@ -64,15 +64,7 @@ jobs:
       - name: NUKI Colonel staged merge (8-file A->Z chain, base sacred, ending final)
         run: |
           cd kernel-source
-          # Belt-and-suspenders: stub out the AOSP-internal GKI 2.0 abi_symbollist.raw
-          # path that defconfig / debug-parrot-genevn.config reference. NUKI Colonel
-          # is GKI 1.0 and doesn't need it (ksu-nh.defconfig disables TRIM_UNUSED_KSYMS).
           mkdir -p out
-          # Clear any hardcoded GKI abi_whitelist path in the merged .config
-          sed -i 's|CONFIG_UNUSED_KSYMS_WHITELIST=.*|CONFIG_UNUSED_KSYMS_WHITELIST=""|g' out/.config 2>/dev/null || true
-          sed -i 's|CONFIG_UNUSED_KSYMS_WHITELIST=.*|CONFIG_UNUSED_KSYMS_WHITELIST=|g' out/.config 2>/dev/null || true
-          grep "KSYMS_WHITELIST" out/.config || echo " UNUSED_KSYMS_WHITELIST: not set (good)"
-
           # Mirror build.config.anyrealm.kernel DEFCONFIG chain (lines 55-64)
           # merge_nuki.py uses positional fallback when no --flags: first=base, last 2=ending, rest=middle
           # Base: ksu-nh.defconfig (sacred Colonel)
@@ -87,6 +79,13 @@ jobs:
             arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config \
             arch/arm64/configs/nurfs-linux.fragment \
             -o out/.config
+
+          # Belt-and-suspenders: stub out the AOSP-internal GKI abi_symbollist.raw
+          # path that debug-parrot-genevn references (path is from a different host).
+          # NUKI Colonel is GKI 1.0; the GKI 2.0 trim path doesn't apply here.
+          sed -i 's|CONFIG_UNUSED_KSYMS_WHITELIST=.*|CONFIG_UNUSED_KSYMS_WHITELIST=""|g' out/.config 2>/dev/null || true
+          sed -i 's|CONFIG_TRIM_UNUSED_KSYMS=y|# CONFIG_TRIM_UNUSED_KSYMS is not set|g' out/.config 2>/dev/null || true
+          grep "TRIM_UNUSED_KSYMS\|KSYMS_WHITELIST" out/.config || echo " TRIM/KSYMS_WHITELIST: cleared (good)"
 
           # LZ4 NEON deployment (kernel Colonel compression, from deploy_lz4.sh)
           [ -f deploy_lz4.sh ] && chmod +x deploy_lz4.sh && ./deploy_lz4.sh || echo "no deploy_lz4.sh"
