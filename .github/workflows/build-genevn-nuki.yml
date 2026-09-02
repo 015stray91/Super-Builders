@@ -246,7 +246,7 @@ jobs:
           export CONFIG_OVERLAY_FS=y
           export CONFIG_OVERLAY_FS_REDIRECT_ALWAYS_FOLLOW=y
           export CONFIG_FUSE_FS=y
-          export CONFIG_FUSE_DAX=y
+          export CONFIG_FUSE_DAX=n
           export CONFIG_TMPFS_XATTR=y
           export CONFIG_TMPFS_POSIX_ACL=y
           # Part 5: NetHunter attack module drivers
