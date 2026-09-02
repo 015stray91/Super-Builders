@@ -89,7 +89,9 @@ jobs:
       - name: Compile NUKI
         run: |
           cd kernel-source
-          make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+          # yes '' answers 'n' (default) to all NEW Kconfig prompts in case
+          # olddefconfig/syncconfig triggers them (no tty on GH Actions)
+          yes "" | make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
             -j$(nproc --all) Image.lz4 modules 2>&1 | tee ../build.log
           ls -lh out/arch/arm64/boot/Image.lz4 || (echo "FAIL"; tail -100 ../build.log; exit 1)
           mkdir -p ../modules
