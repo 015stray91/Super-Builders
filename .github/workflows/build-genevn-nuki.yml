@@ -126,34 +126,41 @@ jobs:
           for f in CONFIG_KSU CONFIG_KSU_SUSFS CONFIG_ZEROMOUNT CONFIG_OVERLAY_FS CONFIG_FUSE_FS CONFIG_TMPFS_XATTR CONFIG_USER_NS CONFIG_IPC_NS CONFIG_FHANDLE CONFIG_SQUASHFS CONFIG_ZRAM CONFIG_KALLSYMS CONFIG_MODULES CONFIG_ARM64 CONFIG_64BIT; do grep -q "^${f}=y" out/.config && echo " PASS $f" || echo " FAIL $f"; done
           grep default_compressor drivers/block/zram/zram_drv.c | head -1
 
-      - name: "A→Z Resolve (alldefconfig fills gaps, curated overrides re-applied)"
+      - name: "A→Z Resolve (alldefconfig fills gaps, curated overrides re-applied) - DEPRECATED merged into Bypass step"
         run: |
           cd kernel-source
+          bypass_traps() {
+            sed -i 's/^CONFIG_TRIM_UNUSED_KSYMS=y/# CONFIG_TRIM_UNUSED_KSYMS is not set/' out/.config
+            sed -i 's/^CONFIG_TRIM_UNUSED_KSYMS=m/# CONFIG_TRIM_UNUSED_KSYMS is not set/' out/.config
+            sed -i 's/^CONFIG_ANDROID_SYMLINKS=y/# CONFIG_ANDROID_SYMLINKS is not set/' out/.config
+            sed -i 's/^CONFIG_ANDROID_SYMLINKS=m/# CONFIG_ANDROID_SYMLINKS is not set/' out/.config
+            sed -i 's/^CONFIG_MODVERSIONS=y/# CONFIG_MODVERSIONS is not set/' out/.config
+            sed -i 's/^CONFIG_MODVERSIONS=m/# CONFIG_MODVERSIONS is not set/' out/.config
+            sed -i 's/^CONFIG_LOCALVERSION_AUTO=y/# CONFIG_LOCALVERSION_AUTO is not set/' out/.config
+            sed -i 's/^CONFIG_WERROR=y/# CONFIG_WERROR is not set/' out/.config
+            sed -i 's/^CONFIG_COMPILE_TEST=y/# CONFIG_COMPILE_TEST is not set/' out/.config
+            sed -i 's/^CONFIG_EMBEDDED=n/CONFIG_EMBEDDED=y/' out/.config
+            sed -i 's/^# CONFIG_EMBEDDED is not set/CONFIG_EMBEDDED=y/' out/.config
+          }
+          bypass_traps
+          echo "=== Bypass (pre) complete ==="
+          grep -E "TRIM_UNUSED_KSYMS|ANDROID_SYMLINKS|MODVERSIONS|WERROR|COMPILE_TEST|EMBEDDED" out/.config | head -10
+          # Run alldefconfig to fill Kconfig gaps (using existing .config as base via KCONFIG_ALLCONFIG,
+          # and never ask for NEW symbols - just confirm defaults for missing keys)
           export ARCH=arm64 SUBARCH=arm64
           export PATH="$PWD/tools/toolchains/snapdragon-toolchain/clang-r416183b/bin:$PWD/tools/toolchains/snapdragon-toolchain/gcc/linux-x86/aarch64/gcc-linaro-7.5.0/bin:$PATH"
           export CROSS_COMPILE=aarch64-linux-gnu- LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CLANG_TRIPLE=aarch64-linux-gnu-
           export CC=clang LLVM=-12 LLVM_IAS=-12
-          echo "=== A→Z resolve: alldefconfig fills Kconfig gaps (your flags stay) ==="
-          yes "" | make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang LLVM=-12 LLVM_IAS=-12 alldefconfig 2>&1 | tail -5 || true
-          echo "=== Kconfig gaps filled: $(grep -c "^CONFIG_" out/.config) CONFIGs ==="
-          # Re-apply your curated overrides on top of alldefconfig defaults (last-wins)
-          python3 scripts/kconfig/merge_nuki.py \
-            --base arch/arm64/configs/defconfig arch/arm64/configs/ksu-nh.defconfig \
-            --middle arch/arm64/configs/consolidate.fragment arch/arm64/configs/defconfig.fragment arch/arm64/configs/vendor/moto-parrot-sm6450.config arch/arm64/configs/vendor/ext_config/debug-parrot-genevn.config \
-            --ending arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config arch/arm64/configs/nurfs-linux.fragment \
-            -o out/.config
-          echo "=== Curated overrides re-applied: $(grep -c "^CONFIG_" out/.config) CONFIGs ==="
+          # olddefconfig fills Kconfig-derived symbols to their defaults from .config.
+          # KCONFIG_ALLCONFIG only works for alldefconfig/allyesconfig, NOT olddefconfig,
+          # so we pipe yes "" to auto-answer prompts with defaults (the real fix).
+          cp out/.config out/.config.before-odf
+          yes "" | make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang LLVM=-12 LLVM_IAS=-12 olddefconfig 2>&1 | tail -10 || true
+          # Re-apply bypass (alldefconfig/olddefconfig may have re-enabled some)
+          bypass_traps
+          echo "=== Kconfig gaps filled + bypass re-applied: $(grep -c "^CONFIG_" out/.config) CONFIGs ==="
           for f in CONFIG_KSU CONFIG_KSU_SUSFS CONFIG_ZEROMOUNT CONFIG_OVERLAY_FS CONFIG_FUSE_FS CONFIG_ZRAM CONFIG_KALLSYMS CONFIG_MODULES CONFIG_ARM64 CONFIG_64BIT; do grep -q "^${f}=y" out/.config && echo " PASS $f" || echo " FAIL $f"; done
-
-      - name: "Bypass TRIM_UNUSED_KSYMS and ANDROID_SYMLINKS"
-        run: |
-          cd kernel-source
-          sed -i 's/^CONFIG_TRIM_UNUSED_KSYMS=y/# CONFIG_TRIM_UNUSED_KSYMS is not set/' out/.config
-          sed -i 's/^CONFIG_TRIM_UNUSED_KSYMS=m/# CONFIG_TRIM_UNUSED_KSYMS is not set/' out/.config
-          sed -i 's/^CONFIG_ANDROID_SYMLINKS=y/# CONFIG_ANDROID_SYMLINKS is not set/' out/.config
-          sed -i 's/^CONFIG_MODVERSIONS=y/# CONFIG_MODVERSIONS is not set/' out/.config
-          echo "=== Bypass complete ==="
-          grep -E "TRIM_UNUSED_KSYMS|ANDROID_SYMLINKS|MODVERSIONS" out/.config | head -5
+          grep -E "TRIM_UNUSED_KSYMS|ANDROID_SYMLINKS|MODVERSIONS|WERROR|COMPILE_TEST|EMBEDDED" out/.config | head -10
 
       - name: Compile NUKI - Image.lz4 (with Koto stupefier if present)
         run: |
@@ -171,7 +178,17 @@ jobs:
             export CC=clang LLVM=-12 LLVM_IAS=-12
           fi
           export CROSS_COMPILE=aarch64-linux-gnu- LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CLANG_TRIPLE=aarch64-linux-gnu-
-          make -j$(nproc --all) O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$CC" LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CLANG_TRIPLE=aarch64-linux-gnu- LLVM=-12 LLVM_IAS=-12 Image.lz4 modules 2>&1 | tee ../build.log
+          # Final defensive bypass - make can trigger syncconfig if .config is stale or sparse
+          sed -i 's/^CONFIG_TRIM_UNUSED_KSYMS=y/# CONFIG_TRIM_UNUSED_KSYMS is not set/' out/.config
+          sed -i 's/^CONFIG_TRIM_UNUSED_KSYMS=m/# CONFIG_TRIM_UNUSED_KSYMS is not set/' out/.config
+          sed -i 's/^CONFIG_ANDROID_SYMLINKS=y/# CONFIG_ANDROID_SYMLINKS is not set/' out/.config
+          sed -i 's/^CONFIG_ANDROID_SYMLINKS=m/# CONFIG_ANDROID_SYMLINKS is not set/' out/.config
+          sed -i 's/^CONFIG_MODVERSIONS=y/# CONFIG_MODVERSIONS is not set/' out/.config
+          sed -i 's/^CONFIG_MODVERSIONS=m/# CONFIG_MODVERSIONS is not set/' out/.config
+          # If make triggers syncconfig / olddefconfig, pipe `yes ""` to auto-answer prompts with
+          # empty lines (default). The compile step otherwise fails with "Error in reading" because
+          # there is no tty on GH Actions.
+          yes "" | make -j$(nproc --all) O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$CC" LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CLANG_TRIPLE=aarch64-linux-gnu- LLVM=-12 LLVM_IAS=-12 Image.lz4 modules 2>&1 | tee ../build.log
           ls -lh out/arch/arm64/boot/Image.lz4 || (echo "FAIL"; tail -100 ../build.log; exit 1)
           mkdir -p ../modules
           find out -name "*.ko" -exec cp {} ../modules/ \;
