@@ -103,40 +103,57 @@ jobs:
           chmod +x deploy_lz4.sh nethunter_hook.sh
           ./deploy_lz4.sh || true
 
-      - name: "Merge NUKI Config (kernel defconfig -> curated -> NURFS, cumulative)"
+      - name: "Merge NUKI Config (A→Z cumulative, curated overrides last)"
         run: |
           cd kernel-source
           mkdir -p out
-          # Cumulative merge chain - kernel defconfig first (foundation), then curated, NURFS last
-          #   base:    arch/arm64/configs/defconfig (2004 CONFIGs - kernel foundation)
-          #   middle:  ksu-nh.defconfig, consolidate.fragment, defconfig.fragment,
-          #            vendor/moto-parrot-sm6450.config,
-          #            vendor/ext_config/debug-parrot-genevn.config
-          #   ending:  vendor/ext_config/debug_moto_parrot_genevn.config, nurfs-linux.fragment
+          # A→Z sequential cumulative merge - each layer builds on the last
+          #   A: defconfig (2004 - kernel foundation)
+          #   B: ksu-nh.defconfig (KSU/SUSFS/ZeroMount/KPM/FUSE/OVERLAY/ZRAM)
+          #   C: consolidate.fragment (100 - debug/test)
+          #   D: defconfig.fragment (81 - extra kernel)
+          #   E: moto-parrot-sm6450.config (218 - Qualcomm SM6450)
+          #   F: debug-parrot-genevn.config (2008 - full Qualcomm/Moto base)
+          #   G: debug_moto_parrot_genevn.config (119 - device overrides)
+          #   H: nurfs-linux.fragment (81 - NURFS Linux additions)
+          # Last layer wins for any conflicts
           python3 scripts/kconfig/merge_nuki.py \
             --base arch/arm64/configs/defconfig arch/arm64/configs/ksu-nh.defconfig \
             --middle arch/arm64/configs/consolidate.fragment arch/arm64/configs/defconfig.fragment arch/arm64/configs/vendor/moto-parrot-sm6450.config arch/arm64/configs/vendor/ext_config/debug-parrot-genevn.config \
             --ending arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config arch/arm64/configs/nurfs-linux.fragment \
             -o out/.config || cp arch/arm64/configs/ksu-nh.defconfig out/.config
-          echo "=== Cumulative merge complete ==="
-          grep -cE "^CONFIG_" out/.config
-          # Force KALLSYMS=y (KSU-Next needs it for live symbol resolution)
-          grep -q "^CONFIG_KALLSYMS=y" out/.config || echo "CONFIG_KALLSYMS=y" >> out/.config
-          for f in CONFIG_KSU CONFIG_KSU_SUSFS CONFIG_ZEROMOUNT CONFIG_OVERLAY_FS CONFIG_FUSE_FS CONFIG_TMPFS_XATTR CONFIG_USER_NS CONFIG_IPC_NS CONFIG_CGROUP_DEVICE CONFIG_FHANDLE CONFIG_SQUASHFS CONFIG_ANDROID_BINDER_IPC CONFIG_ASHMEM CONFIG_ZRAM CONFIG_KALLSYMS CONFIG_MODULES CONFIG_ARM64 CONFIG_64BIT; do grep -q "^${f}=y" out/.config && echo " PASS $f" || echo " FAIL $f"; done
+          echo "=== Cumulative merge complete: $(grep -c "^CONFIG_" out/.config) CONFIGs ==="
+          for f in CONFIG_KSU CONFIG_KSU_SUSFS CONFIG_ZEROMOUNT CONFIG_OVERLAY_FS CONFIG_FUSE_FS CONFIG_TMPFS_XATTR CONFIG_USER_NS CONFIG_IPC_NS CONFIG_FHANDLE CONFIG_SQUASHFS CONFIG_ZRAM CONFIG_KALLSYMS CONFIG_MODULES CONFIG_ARM64 CONFIG_64BIT; do grep -q "^${f}=y" out/.config && echo " PASS $f" || echo " FAIL $f"; done
           grep default_compressor drivers/block/zram/zram_drv.c | head -1
 
-      - name: OEM ABI Bypass (disable TRIM_UNUSED_KSYMS and ANDROID_SYMLINKS)
+      - name: "A→Z Resolve (alldefconfig fills gaps, curated overrides re-applied)"
         run: |
           cd kernel-source
-          # Disable TRIM_UNUSED_KSYMS/ANDROID_SYMLINKS/MODVERSIONS in the ACTUAL .config
-          # (not source files - olddefconfig re-enables them from Kconfig dependencies)
-          sed -i 's/CONFIG_TRIM_UNUSED_KSYMS=y/# CONFIG_TRIM_UNUSED_KSYMS is not set/' out/.config
-          sed -i 's/CONFIG_TRIM_UNUSED_KSYMS=m/# CONFIG_TRIM_UNUSED_KSYMS is not set/' out/.config
-          sed -i 's/CONFIG_ANDROID_SYMLINKS=y/# CONFIG_ANDROID_SYMLINKS is not set/' out/.config
-          sed -i 's/CONFIG_MODVERSIONS=y/# CONFIG_MODVERSIONS is not set/' out/.config
-          echo "=== Bypassed TRIM_UNUSED_KSYMS/ANDROID_SYMLINKS/MODVERSIONS in out/.config ==="
+          export ARCH=arm64 SUBARCH=arm64
+          export PATH="$PWD/tools/toolchains/snapdragon-toolchain/clang-r416183b/bin:$PWD/tools/toolchains/snapdragon-toolchain/gcc/linux-x86/aarch64/gcc-linaro-7.5.0/bin:$PATH"
+          export CROSS_COMPILE=aarch64-linux-gnu- LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CLANG_TRIPLE=aarch64-linux-gnu-
+          export CC=clang LLVM=-12 LLVM_IAS=-12
+          echo "=== A→Z resolve: alldefconfig fills Kconfig gaps (your flags stay) ==="
+          yes "" | make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang LLVM=-12 LLVM_IAS=-12 alldefconfig 2>&1 | tail -5 || true
+          echo "=== Kconfig gaps filled: $(grep -c "^CONFIG_" out/.config) CONFIGs ==="
+          # Re-apply your curated overrides on top of alldefconfig defaults (last-wins)
+          python3 scripts/kconfig/merge_nuki.py \
+            --base arch/arm64/configs/defconfig arch/arm64/configs/ksu-nh.defconfig \
+            --middle arch/arm64/configs/consolidate.fragment arch/arm64/configs/defconfig.fragment arch/arm64/configs/vendor/moto-parrot-sm6450.config arch/arm64/configs/vendor/ext_config/debug-parrot-genevn.config \
+            --ending arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config arch/arm64/configs/nurfs-linux.fragment \
+            -o out/.config
+          echo "=== Curated overrides re-applied: $(grep -c "^CONFIG_" out/.config) CONFIGs ==="
+          for f in CONFIG_KSU CONFIG_KSU_SUSFS CONFIG_ZEROMOUNT CONFIG_OVERLAY_FS CONFIG_FUSE_FS CONFIG_ZRAM CONFIG_KALLSYMS CONFIG_MODULES CONFIG_ARM64 CONFIG_64BIT; do grep -q "^${f}=y" out/.config && echo " PASS $f" || echo " FAIL $f"; done
+
+      - name: "Bypass TRIM_UNUSED_KSYMS and ANDROID_SYMLINKS"
+        run: |
+          cd kernel-source
+          sed -i 's/^CONFIG_TRIM_UNUSED_KSYMS=y/# CONFIG_TRIM_UNUSED_KSYMS is not set/' out/.config
+          sed -i 's/^CONFIG_TRIM_UNUSED_KSYMS=m/# CONFIG_TRIM_UNUSED_KSYMS is not set/' out/.config
+          sed -i 's/^CONFIG_ANDROID_SYMLINKS=y/# CONFIG_ANDROID_SYMLINKS is not set/' out/.config
+          sed -i 's/^CONFIG_MODVERSIONS=y/# CONFIG_MODVERSIONS is not set/' out/.config
+          echo "=== Bypass complete ==="
           grep -E "TRIM_UNUSED_KSYMS|ANDROID_SYMLINKS|MODVERSIONS" out/.config | head -5
-          echo "OEM ABI bypass complete - abi_symbollist.raw trap neutralized"
 
       - name: Compile NUKI - Image.lz4 (with Koto stupefier if present)
         run: |
