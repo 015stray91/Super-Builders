@@ -35,6 +35,10 @@ jobs:
           sudo apt-get install -y bc bison flex libssl-dev libelf-dev cpio kmod python3 lz4 liblz4-tool libncurses-dev rsync zip curl wget gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu device-tree-compiler lld-12 llvm-12
           # LLVM=-12 makes kernel Makefile use version-suffixed tools (ld.lld-12, clang-12, etc.) from apt
           ld.lld-12 --version | head -1
+          # Kconfig.include:40 checks for unsuffixed 'ld.lld' during olddefconfig (host linking), symlink ld.lld-12 -> ld.lld
+          sudo ln -sf /usr/bin/ld.lld-12 /usr/local/bin/ld.lld
+          sudo ln -sf /usr/bin/ld.lld-12 /usr/local/bin/ld64.lld
+          which ld.lld && ld.lld --version | head -1
 
       - name: Clone Updated NUKI Source (015stray91/kernel-msm-1)
         run: |
@@ -101,8 +105,6 @@ jobs:
 
       - name: Merge NUKI Config (ksu-nh deduped + NURFS)
         run: |
-          # Must PATH the snapdragon toolchain before olddefconfig so Makefile finds ld.lld for Kconfig host linking (syncconfig step)
-          export PATH="$HOME/bin:$PWD/kernel-source/tools/toolchains/snapdragon-toolchain/clang-r416183b/bin:$PWD/kernel-source/tools/toolchains/snapdragon-toolchain/gcc/linux-x86/aarch64/gcc-linaro-7.5.0/bin:$PATH"
           cd kernel-source
           mkdir -p out
           python3 scripts/kconfig/merge_nuki.py \
