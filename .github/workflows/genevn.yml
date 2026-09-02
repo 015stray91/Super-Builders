@@ -13,7 +13,7 @@ jobs:
         sparse-checkout: "device-profiles.json"
       - name: Initialize Full Build Environment
         run: |
-           Install the complete suite of build tools and libraries
+          # Install the complete suite of build tools and libraries
           sudo apt-get update
           sudo apt-get install build-essential libncurses5-dev libncursesw5-dev \
             libqt5core5a libqt5gui5 libqt5widgets5 qtbase5-dev \
