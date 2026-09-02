@@ -103,18 +103,18 @@ jobs:
           chmod +x deploy_lz4.sh nethunter_hook.sh
           ./deploy_lz4.sh || true
 
-      - name: Merge NUKI Config (ksu-nh + NURFS, cumulative, no flag lost)
+      - name: Merge NUKI Config (cumulative: kernel defconfig -> curated -> NURFS, no flag lost)
         run: |
           cd kernel-source
           mkdir -p out
-          # Full cumulative merge chain (matches nethunter_hook.sh)
-          # 8 files: base sacred -> middle staged -> ending final, last-wins
-          #   base:    ksu-nh.defconfig (KSU Colonel sacred)
-          #   middle:  consolidate.fragment, defconfig.fragment, vendor/moto-parrot-sm6450.config,
-          #            vendor/ext_config/debug-parrot-genevn.config (Qualcomm + Genevn base)
+          # Cumulative merge chain - kernel defconfig first (foundation), then curated, NURFS last
+          #   base:    arch/arm64/configs/defconfig (2004 CONFIGs - kernel foundation)
+          #   middle:  ksu-nh.defconfig, consolidate.fragment, defconfig.fragment,
+          #            vendor/moto-parrot-sm6450.config,
+          #            vendor/ext_config/debug-parrot-genevn.config
           #   ending:  vendor/ext_config/debug_moto_parrot_genevn.config, nurfs-linux.fragment
           python3 scripts/kconfig/merge_nuki.py \
-            --base arch/arm64/configs/ksu-nh.defconfig \
+            --base arch/arm64/configs/defconfig arch/arm64/configs/ksu-nh.defconfig \
             --middle arch/arm64/configs/consolidate.fragment arch/arm64/configs/defconfig.fragment arch/arm64/configs/vendor/moto-parrot-sm6450.config arch/arm64/configs/vendor/ext_config/debug-parrot-genevn.config \
             --ending arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config arch/arm64/configs/nurfs-linux.fragment \
             -o out/.config || cp arch/arm64/configs/ksu-nh.defconfig out/.config
