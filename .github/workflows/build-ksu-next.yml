@@ -169,23 +169,66 @@ jobs:
           DEBUG_C="${{ steps.profile.outputs.debug_config }}"
           NURFS="${{ steps.profile.outputs.nurfs_fragment }}"
 
+          echo "=== olddefconfig (silent) ==="
+          if yes '' | make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CC=clang HOSTCC=gcc LLVM=-12 LLVM_IAS=-12 olddefconfig 2>&1 | tee ../config.log | tail -3; then
+            echo "  Config OK"
+          else
+            echo "  Config failed — checking common issues..."
+            grep "CONFIG_WERROR" out/.config && echo "  WARNING: CONFIG_WERROR may cause silentoldconfig prompts"
+            grep "CONFIG_UNUSED_KSYMS" out/.config && echo "  WARNING: KSYMS_WHITELIST needs disabling"
+            echo "  Retrying with alldefconfig..."
+            make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+              CC=clang HOSTCC=gcc LLVM=-12 LLVM_IAS=-12 alldefconfig 2>&1 | tail -3
+          fi
+
+      - name: Configure Kernel
+        run: |
+          cd kernel-source
+
+          DEFCONFIG="${{ steps.profile.outputs.defconfig }}"
+          VENDOR="${{ steps.profile.outputs.vendor_config }}"
+          DEBUG_C="${{ steps.profile.outputs.debug_config }}"
+          NURFS="${{ steps.profile.outputs.nurfs_fragment }}"
+
+          echo "=== Checking configs exist ==="
+          for f in "arch/arm64/configs/${DEFCONFIG}" "${VENDOR}" "${DEBUG_C}" "${NURFS}"; do
+            if [ -f "$f" ]; then
+              echo "  OK: $f"
+            else
+              echo "  MISSING: $f"
+            fi
+          done
+
+          echo "=== Toolchain check ==="
+          if [ -f "tools/toolchains/snapdragon-toolchain/clang-r416183b/bin/clang" ]; then
+            echo "  OK: clang found"
+          else
+            echo "  ERROR: clang NOT found in tools/toolchains/snapdragon-toolchain/"
+            ls -la tools/toolchains/snapdragon-toolchain/ 2>/dev/null || echo "  dir missing"
+            exit 1
+          fi
+
+          mkdir -p out
+
           python3 scripts/kconfig/merge_nuki.py \
             --base "arch/arm64/configs/${DEFCONFIG}" \
             --middle "${VENDOR}" \
             --ending "${DEBUG_C}" "${NURFS}" \
             -o out/.config
 
-          make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
-            CC=clang HOSTCC=gcc LLVM=-12 LLVM_IAS=-12 allnoconfig 2>&1 | tail -3
-
-          python3 scripts/kconfig/merge_nuki.py \
-            --base "arch/arm64/configs/${DEFCONFIG}" \
-            --middle "${VENDOR}" \
-            --ending "${DEBUG_C}" "${NURFS}" \
-            -o out/.config
-
-          yes '' | make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
-            CC=clang HOSTCC=gcc LLVM=-12 LLVM_IAS=-12 olddefconfig 2>&1 | tail -5
+          echo "=== olddefconfig (silent) ==="
+          if yes '' | make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CC=clang HOSTCC=gcc LLVM=-12 LLVM_IAS=-12 olddefconfig 2>&1 | tee ../config.log | tail -3; then
+            echo "  Config OK"
+          else
+            echo "  Config failed — checking common issues..."
+            grep "CONFIG_WERROR" out/.config && echo "  WARNING: CONFIG_WERROR may cause silentoldconfig prompts"
+            grep "CONFIG_UNUSED_KSYMS" out/.config && echo "  WARNING: KSYMS_WHITELIST needs disabling"
+            echo "  Retrying with alldefconfig..."
+            make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+              CC=clang HOSTCC=gcc LLVM=-12 LLVM_IAS=-12 alldefconfig 2>&1 | tail -3
+          fi
 
           echo "=== .config: $(grep -c '^CONFIG_' out/.config) CONFIGs ==="
           for f in CONFIG_KSU CONFIG_KSU_SUSFS CONFIG_ZEROMOUNT CONFIG_OVERLAY_FS \
@@ -197,11 +240,33 @@ jobs:
       - name: Compile NUKI
         run: |
           cd kernel-source
+          echo "=== Starting build ==="
+          echo "Compiler: $(tools/toolchains/snapdragon-toolchain/clang-r416183b/bin/clang --version | head -1)"
+
+          BUILD_RC=0
           make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
-            -j$(nproc --all) Image.lz4 modules 2>&1 | tee ../build.log
-          ls -lh out/arch/arm64/boot/Image.lz4 || (echo "BUILD FAILED"; tail -100 ../build.log; exit 1)
+            -j$(nproc --all) Image.lz4 modules 2>&1 | tee ../build.log || BUILD_RC=$?
+
+          if [ $BUILD_RC -ne 0 ]; then
+            echo "=== BUILD FAILED (exit $BUILD_RC) ==="
+            echo "=== Last 50 lines of build.log ==="
+            tail -50 ../build.log
+            echo "=== Checking for Image.lz4 ==="
+            ls -lh out/arch/arm64/boot/Image* 2>/dev/null || echo "No Image found"
+            echo "=== Checking for .config ==="
+            grep "CONFIG_MODULES" out/.config || echo "CONFIG_MODULES missing"
+            echo "=== Common fixes ==="
+            echo "  - CONFIG_MODULES=y required for modules target"
+            echo "  - CONFIG_WERROR can cause build failures"
+            echo "  - Run locally: cd kernel-source && make O=out olddefconfig"
+            exit $BUILD_RC
+          fi
+
+          echo "=== Build succeeded ==="
+          ls -lh out/arch/arm64/boot/Image.lz4
           mkdir -p ../modules
           find out -name "*.ko" -exec cp {} ../modules/ \;
+          echo "=== Modules: $(ls ../modules/*.ko 2>/dev/null | wc -l) .ko files ==="
 
       - name: Package Flashable ZIP
         run: |
