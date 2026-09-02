@@ -101,18 +101,42 @@ jobs:
 
           # 4) Apply KSU seal patches (real source diffs from Super-Builders)
           #    These add fs/susfs.c, fs/zeromount.c, modify ksu Kbuild, etc.
-          if [ -d "$KSU_PATCHES" ]; then
-            echo "=== Apply patches (KSU seal) ==="
-            for patch in "$KSU_PATCHES"/*.patch; do
-              [ -f "$patch" ] || continue
-              echo "  -> $(basename $patch)"
-              patch -p1 -F3 --forward < "$patch" || echo "  ! $(basename $patch) already applied or failed"
-            done
-          else
-            echo "patches not found at $KSU_PATCHES - skipping"
-          fi
+           if [ -d "$KSU_PATCHES" ]; then
+             echo "=== Apply patches (KSU seal) ==="
+             for patch in "$KSU_PATCHES"/*.patch; do
+               [ -f "$patch" ] || continue
+               echo "  -> $(basename $patch)"
+               patch -p1 -F3 --forward < "$patch" || echo "  ! $(basename $patch) already applied or failed"
+             done
+           else
+             echo "patches not found at $KSU_PATCHES - skipping"
+           fi
 
-          # 5) fix-susfs-compat: post-patch runtime compatibility fixes
+           # Direct fix: ensure inotify_fdinfo uses 3-arg form when KSU_SUSFS_SUS_MOUNT=y
+           echo "=== Direct fdinfo.c fix (inotify_fdinfo 3-arg sig) ==="
+           python3 << 'PYFIX'
+import re
+with open("fs/notify/fdinfo.c", "r") as f:
+    content = f.read()
+
+old = "static void inotify_fdinfo(struct seq_file *m, struct fsnotify_mark *mark)\n{"
+new = """#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+static void inotify_fdinfo(struct seq_file *m, struct fsnotify_mark *mark, struct file *file)
+#else
+static void inotify_fdinfo(struct seq_file *m, struct fsnotify_mark *mark)
+#endif
+{"""
+
+if old in content:
+    content = content.replace(old, new)
+    with open("fs/notify/fdinfo.c", "w") as f:
+        f.write(content)
+    print("  + Patched inotify_fdinfo signature")
+else:
+    print("  - inotify_fdinfo already has 3-arg form or different structure")
+PYFIX
+
+           # 5) fix-susfs-compat: post-patch runtime compatibility fixes
           #    (show_pad label, inotify_mark_user_mask, i_uid_into_mnt, etc.)
           if [ -f "$HELPER/fix-susfs-compat.sh" ]; then
             echo "=== fix-susfs-compat (sublevel=$SUBLEVEL) ==="
