@@ -1,0 +1,8 @@
+name: "AnyRealm NUKI - CodeQL ignore stealth engine"
+paths-ignore:
+  - fs/koto/**
+  - tools/toolchains/**
+  - lz4/**
+  - lib/lz4/**
+  - kali-nethunter-kernel-builder-main/**
+  - .archive_*
