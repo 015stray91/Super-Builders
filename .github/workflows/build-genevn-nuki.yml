@@ -103,16 +103,26 @@ jobs:
           chmod +x deploy_lz4.sh nethunter_hook.sh
           ./deploy_lz4.sh || true
 
-      - name: Merge NUKI Config (ksu-nh deduped + NURFS)
+      - name: Merge NUKI Config (ksu-nh deduped + NURFS) - sequential buildup
         run: |
           cd kernel-source
           mkdir -p out
+          # Sequential buildup merge: base -> middle -> ending, no flag lost
+          # Each merge APPENDS (not overwrites) so sacred flags survive
           python3 scripts/kconfig/merge_nuki.py \
             --base arch/arm64/configs/ksu-nh.defconfig \
             --middle arch/arm64/configs/vendor/moto-parrot-sm6450.config arch/arm64/configs/vendor/ext_config/moto-parrot-genevn.config arch/arm64/configs/vendor/ext_config/debug-parrot-genevn.config \
             --ending arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config arch/arm64/configs/nurfs-linux.fragment \
             -o out/.config || cp arch/arm64/configs/ksu-nh.defconfig out/.config
           make O=out ARCH=arm64 LLVM=-12 LLVM_IAS=-12 olddefconfig
+          # Re-apply ending flags AFTER olddefconfig (sequential buildup - ending overwrites olddefconfig's defaults)
+          cat arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config arch/arm64/configs/nurfs-linux.fragment >> out/.config
+          # Re-apply sacred base flags last (KALLSYMS, KSU, etc. that middle might scrub)
+          for flag in CONFIG_KSU=y CONFIG_KSU_SUSFS=y CONFIG_ZEROMOUNT=y CONFIG_OVERLAY_FS=y CONFIG_FUSE_FS=y CONFIG_TMPFS_XATTR=y CONFIG_USER_NS=y CONFIG_IPC_NS=y CONFIG_CGROUP_DEVICE=y CONFIG_FHANDLE=y CONFIG_SQUASHFS=y CONFIG_ANDROID_BINDER_IPC=y CONFIG_ASHMEM=y CONFIG_ZRAM=y; do
+            key="${flag%=*}"
+            sed -i "s/^# $key is not set$/$flag/" out/.config
+            grep -q "^$flag$" out/.config || echo "$flag" >> out/.config
+          done
           for f in CONFIG_KSU CONFIG_KSU_SUSFS CONFIG_ZEROMOUNT CONFIG_OVERLAY_FS CONFIG_FUSE_FS CONFIG_TMPFS_XATTR CONFIG_USER_NS CONFIG_IPC_NS CONFIG_CGROUP_DEVICE CONFIG_FHANDLE CONFIG_SQUASHFS CONFIG_ANDROID_BINDER_IPC CONFIG_ASHMEM CONFIG_ZRAM; do grep -q "^${f}=y" out/.config && echo " PASS $f" || echo " FAIL $f"; done
           grep default_compressor drivers/block/zram/zram_drv.c | head -1
 
@@ -127,6 +137,13 @@ jobs:
           sed -i 's/CONFIG_MODVERSIONS=y/# CONFIG_MODVERSIONS is not set/' out/.config
           echo "=== Bypassed TRIM_UNUSED_KSYMS/ANDROID_SYMLINKS/MODVERSIONS in out/.config ==="
           grep -E "TRIM_UNUSED_KSYMS|ANDROID_SYMLINKS|MODVERSIONS" out/.config | head -5
+          # Re-force sacred flags after sed (sed may have killed them)
+          for flag in CONFIG_KSU=y CONFIG_KSU_SUSFS=y CONFIG_ZEROMOUNT=y CONFIG_OVERLAY_FS=y CONFIG_FUSE_FS=y CONFIG_TMPFS_XATTR=y CONFIG_USER_NS=y CONFIG_IPC_NS=y CONFIG_CGROUP_DEVICE=y CONFIG_FHANDLE=y CONFIG_SQUASHFS=y CONFIG_ANDROID_BINDER_IPC=y CONFIG_ASHMEM=y CONFIG_ZRAM=y; do
+            key="${flag%=*}"
+            sed -i "s/^# $key is not set$/$flag/" out/.config
+            grep -q "^$flag$" out/.config || echo "$flag" >> out/.config
+          done
+          echo "=== Re-injected sacred flags after sed ==="
           echo "OEM ABI bypass complete - abi_symbollist.raw trap neutralized"
 
       - name: Compile NUKI - Image.lz4 (with Koto stupefier if present)
