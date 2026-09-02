@@ -32,21 +32,16 @@ jobs:
           # Ensure output directory exists locally
           mkdir -p out
           
-          # Merge configurations
-          ./scripts/kconfig/merge_config.sh  \
+          # Merge NUKI configurations - NO GKI (GKI reverts to stock)
+          ./scripts/kconfig/merge_config.sh -m -O out \
             arch/arm64/configs/ksu-nh.defconfig \
-            arch/arm64/configs/vendor/parrot_consolidate.config \
-            arch/arm64/configs/vendor/parrot_GKI.config \
-            arch/arm64/configs/vendor/ext_config/moto-parrot.config \
-            arch/arm64/configs/vendor/ext_config/moto-parrot-gki.config \
-            build.config.msm.parrot \
+            arch/arm64/configs/consolidate.fragment \
+            arch/arm64/configs/defconfig.fragment \
+            arch/arm64/configs/vendor/moto-parrot-sm6450.config \
             arch/arm64/configs/vendor/ext_config/debug-parrot-genevn.config \
-            
-          # Copy the merged config to the out directory to satisfy the build system
-          cp .config out/
-          
-          # Finalize config using the local directory
-          make ARCH=arm64 O=out ksu-nh.defconfig
+            arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config \
+            arch/arm64/configs/nurfs-linux.fragment
+          make ARCH=arm64 O=out olddefconfig
 
       - name: Build Kernel
         run: |
