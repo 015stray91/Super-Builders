@@ -33,15 +33,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison flex libssl-dev libelf-dev cpio kmod python3 lz4 liblz4-tool libncurses-dev rsync zip curl wget gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu device-tree-compiler lld-12 llvm-12
-          # Pre-stage snapdragon ld.lld so Kconfig olddefconfig can find it (Makefile uses 'ld.lld' for syncconfig host linking)
-          mkdir -p $HOME/bin
-          for t in ld.lld ld64.lld llvm-ar llvm-nm llvm-objcopy llvm-objdump llvm-strip; do
-            if [ -x kernel-source/tools/toolchains/snapdragon-toolchain/clang-r416183b/bin/$t ]; then
-              ln -sf $PWD/kernel-source/tools/toolchains/snapdragon-toolchain/clang-r416183b/bin/$t $HOME/bin/$t
-            fi
-          done
-          ls -la $HOME/bin/ | head -20
-          $HOME/bin/ld.lld --version 2>&1 | head -1 || echo "ld.lld pre-stage failed"
+          # LLVM=-12 makes kernel Makefile use version-suffixed tools (ld.lld-12, clang-12, etc.) from apt
+          ld.lld-12 --version | head -1
 
       - name: Clone Updated NUKI Source (015stray91/kernel-msm-1)
         run: |
@@ -117,7 +110,7 @@ jobs:
             --middle arch/arm64/configs/consolidate.fragment arch/arm64/configs/defconfig.fragment arch/arm64/configs/vendor/moto-parrot-sm6450.config arch/arm64/configs/vendor/ext_config/debug-parrot-genevn.config \
             --ending arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config arch/arm64/configs/nurfs-linux.fragment \
             -o out/.config || cp arch/arm64/configs/ksu-nh.defconfig out/.config
-          make O=out ARCH=arm64 olddefconfig
+          make O=out ARCH=arm64 LLVM=-12 LLVM_IAS=-12 olddefconfig
           for f in CONFIG_KSU CONFIG_KSU_SUSFS CONFIG_ZEROMOUNT CONFIG_OVERLAY_FS CONFIG_FUSE_FS CONFIG_TMPFS_XATTR CONFIG_USER_NS CONFIG_IPC_NS CONFIG_CGROUP_DEVICE CONFIG_FHANDLE CONFIG_SQUASHFS CONFIG_ANDROID_BINDER_IPC CONFIG_ASHMEM CONFIG_ZRAM; do grep -q "^${f}=y" out/.config && echo " PASS $f" || echo " FAIL $f"; done
           grep default_compressor drivers/block/zram/zram_drv.c | head -1
 
@@ -125,19 +118,19 @@ jobs:
         run: |
           cd kernel-source
           export ARCH=arm64 SUBARCH=arm64
-          export PATH="$HOME/bin:$PWD/tools/toolchains/snapdragon-toolchain/clang-r416183b/bin:$PWD/tools/toolchains/snapdragon-toolchain/gcc/linux-x86/aarch64/gcc-linaro-7.5.0/bin:$PATH"
-          export CROSS_COMPILE=aarch64-linux-gnu- LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip LLVM=1 LLVM_IAS=1 CLANG_TRIPLE=aarch64-linux-gnu-
-          which ld.lld && ld.lld --version | head -1
           if [ -x "$KOTO_WRAPPER" ] && [ -x "$HOME/compiler-node/kits/llvm-full/llvm-17.0.6/bin/clang-17" ]; then
             echo "Using Kotoamatsukami LLVM-17 obfuscator (stupefier) - Mist over fs/koto/** and susfs*"
-            export PATH="$HOME/compiler-node/kits/llvm-full/llvm-17.0.6/bin:$PATH" CC="$KOTO_WRAPPER"
+            export PATH="$HOME/compiler-node/kits/llvm-full/llvm-17.0.6/bin:$HOME/compiler-node/kits/llvm-full/llvm-17.0.6/bin/clang-17:$PATH"
+            export CC="$KOTO_WRAPPER" LLVM=-12 LLVM_IAS=-12
             export KOTO_PASSES="--obfuscator --flatten --bcf --sub --splits 3"
             export KOTO_TARGET_GLOBS="fs/koto/**,fs/susfs.c,include/linux/susfs.h,drivers/**/susfs*"
           else
             echo "Using in-tree snapdragon clang-r416183b (Koto not cached)"
-            export CC=clang
+            export PATH="$PWD/tools/toolchains/snapdragon-toolchain/clang-r416183b/bin:$PWD/tools/toolchains/snapdragon-toolchain/gcc/linux-x86/aarch64/gcc-linaro-7.5.0/bin:$PATH"
+            export CC=clang LLVM=-12 LLVM_IAS=-12
           fi
-          make -j$(nproc --all) O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$CC" LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 Image.gz 2>&1 | tee ../build.log
+          export CROSS_COMPILE=aarch64-linux-gnu- LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CLANG_TRIPLE=aarch64-linux-gnu-
+          make -j$(nproc --all) O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$CC" LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CLANG_TRIPLE=aarch64-linux-gnu- LLVM=-12 LLVM_IAS=-12 Image.gz 2>&1 | tee ../build.log
           ls -lh out/arch/arm64/boot/Image.gz || (echo "FAIL"; tail -100 ../build.log; exit 1)
 
       - name: Upload NUKI
