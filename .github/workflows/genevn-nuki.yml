@@ -1,0 +1,167 @@
+name: AnyRealm NUKI - Genevn SM6450
+
+# NUKI = Native Unified Kernel Image | NURFS = Native Unified RootFS
+# Architecture: 3 reusable workflows (toolchain + ksu-nh + qcom-moto) → compile
+
+on:
+  push:
+    branches: [ 015stray91 ]
+  workflow_dispatch:
+    inputs:
+      device_codename:
+        description: "Device codename"
+        type: choice
+        options:
+          - genevn-g
+          - lake
+        default: "genevn-g"
+      kernel_branch:
+        description: "kernel-msm-1 branch"
+        default: "android-14-release-u1tgns34.42-86-2-32"
+        type: string
+
+env:
+  DEVICE_CODENAME: ${{ inputs.device_codename || 'genevn-g' }}
+  KERNEL_BRANCH: ${{ inputs.kernel_branch || 'android-14-release-u1tgns34.42-86-2-32' }}
+
+jobs:
+  # Step 1: Toolchain + Environment
+  toolchain:
+    uses: ./.github/workflows/nuki-toolchain.yml
+    with:
+      device_codename: ${{ env.DEVICE_CODENAME }}
+      kernel_branch: ${{ env.KERNEL_BRANCH }}
+
+  # Step 2: KSU + NetHunter + Kernel Source
+  ksu-nh:
+    uses: ./.github/workflows/nuki-ksu-nh.yml
+    with:
+      device_codename: ${{ env.DEVICE_CODENAME }}
+      kernel_branch: ${{ env.KERNEL_BRANCH }}
+
+  # Step 3: QCOM + Moto Device Config
+  qcom-moto:
+    uses: ./.github/workflows/nuki-qcom-moto.yml
+    with:
+      device_codename: ${{ env.DEVICE_CODENAME }}
+
+  # Step 4: Build
+  build:
+    name: Build NUKI - ${{ env.DEVICE_CODENAME }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    needs: [toolchain, ksu-nh, qcom-moto]
+    env:
+      ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
+
+    steps:
+      - name: Maximize Build Space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 2048
+          swap-size-mb: 8192
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+
+      - name: Download Toolchain
+        uses: actions/download-artifact@v4
+        with:
+          name: nuki-toolchain
+          path: compiler-node
+
+      - name: Download Kernel Source
+        uses: actions/download-artifact@v4
+        with:
+          name: nuki-kernel-source
+          path: kernel-source
+
+      - name: Setup Toolchain in Kernel Source
+        run: |
+          cd kernel-source
+          mkdir -p tools/toolchains/snapdragon-toolchain
+          mkdir -p tools/toolchains/snapdragon-toolchain/gcc/linux-x86/aarch64
+          cp -r ../compiler-node/clang/host/linux-x86/clang-r416183b tools/toolchains/snapdragon-toolchain/
+          cp -r ../compiler-node/gcc/linux-x86/aarch64/gcc-linaro-7.5.0 tools/toolchains/snapdragon-toolchain/gcc/linux-x86/aarch64/
+          rm -rf ../compiler-node
+          echo "=== llvm-ar: ==="; ls -l tools/toolchains/snapdragon-toolchain/clang-r416183b/bin/llvm-ar
+          echo "=== aarch64-gcc: ==="; ls -l tools/toolchains/snapdragon-toolchain/gcc/linux-x86/aarch64/gcc-linaro-7.5.0/bin/aarch64-linux-gnu-gcc
+
+      - name: Install System Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison flex libssl-dev libelf-dev cpio kmod python3 \
+            lz4 liblz4-tool libncurses-dev rsync zip curl wget make device-tree-compiler \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu lld-12 llvm-12 git-lfs
+          sudo ln -sf /usr/bin/ld.lld-12 /usr/local/bin/ld.lld
+          sudo ln -sf /usr/bin/ld.lld-12 /usr/local/bin/ld64.lld
+
+      - name: Patch Kernel Source
+        run: |
+          cd kernel-source
+
+          cat > include/linux/lz4_arm64_decompress.h << 'LZ4EOF'
+          #ifndef _KOTO_LZ4_ARM64_DECOMPRESS_H
+          #define _KOTO_LZ4_ARM64_DECOMPRESS_H
+          #include <linux/types.h>
+          ssize_t LZ4_arm64_decompress_safe(const void *source, void *dest,
+                                            size_t inputSize, size_t outputSize,
+                                            bool dip);
+          #endif
+          LZ4EOF
+
+          for f in $(grep -rl "LZ4_arm64_decompress_safe" --include="*.c" . 2>/dev/null); do
+            if ! grep -q 'lz4_arm64_decompress.h' "$f"; then
+              echo "Patching: $f"
+              sed -i '/^#include <linux\/lz4.h>/a #include <linux/lz4_arm64_decompress.h>' "$f"
+            fi
+          done
+
+          if ! grep -q 'DEFAULT_UNSHARE_KSU_MNT_ID' fs/namespace.c; then
+            sed -i '/#include <uapi\/linux\/mount.h>/a #ifndef DEFAULT_UNSHARE_KSU_MNT_ID\n#define DEFAULT_UNSHARE_KSU_MNT_ID 100000\n#endif' fs/namespace.c
+          fi
+
+      - name: Configure Kernel
+        run: |
+          cd kernel-source
+          mkdir -p out
+
+          python3 scripts/kconfig/merge_nuki.py \
+            --base arch/arm64/configs/ksu-nh.defconfig \
+            --middle arch/arm64/configs/vendor/moto-parrot-sm6450.config \
+            --ending arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config \
+                     arch/arm64/configs/nurfs-linux.fragment \
+            -o out/.config
+
+          make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CC=clang HOSTCC=gcc LLVM=-12 LLVM_IAS=-12 silentoldconfig 2>&1 | tail -5
+
+          echo "=== Final .config: $(grep -c '^CONFIG_' out/.config) CONFIGs ==="
+          for f in CONFIG_KSU CONFIG_KSU_SUSFS CONFIG_ZEROMOUNT CONFIG_OVERLAY_FS \
+                   CONFIG_FUSE_FS CONFIG_ZRAM CONFIG_KALLSYMS CONFIG_MODULES \
+                   CONFIG_ARM64 CONFIG_QCOM_EUD CONFIG_KPM; do
+            grep -q "^${f}=y" out/.config && echo " PASS $f" || echo " FAIL $f"
+          done
+
+      - name: Compile NUKI
+        run: |
+          cd kernel-source
+          make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            -j$(nproc --all) Image.lz4 modules 2>&1 | tee ../build.log
+          ls -lh out/arch/arm64/boot/Image.lz4 || (echo "BUILD FAILED"; tail -100 ../build.log; exit 1)
+          mkdir -p ../modules
+          find out -name "*.ko" -exec cp {} ../modules/ \;
+
+      - name: Upload NUKI
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: AnyRealm-NUKI-${{ env.DEVICE_CODENAME }}-${{ github.run_number }}
+          path: |
+            kernel-source/out/arch/arm64/boot/Image.lz4
+            kernel-source/out/arch/arm64/boot/Image
+            build.log
+            kernel-source/out/.config
+            modules/
+          compression-level: 9
+          overwrite: true
