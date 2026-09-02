@@ -112,12 +112,14 @@ jobs:
         run: |
           cd kernel-source
           export ARCH=arm64; export SUBARCH=arm64
-          # Use full compiler-node if Koto wrapper is present (the stupefier from llvm-17-plugins), else fallback to in-tree snapdragon
+          # Use full compiler-node if Koto wrapper is present (the stupefier from llvm-17-plugins) - helps SUFS become stronger via Mist
           if [ -x "$KOTO_WRAPPER" ] && [ -x "$HOME/compiler-node/kits/llvm-full/llvm-17.0.6/bin/clang-17" ]; then
-            echo "Using Kotoamatsukami LLVM-17 obfuscator (stupefier) via $KOTO_WRAPPER"
+            echo "Using Kotoamatsukami LLVM-17 obfuscator (stupefier) to help SUFS - Mist over fs/koto/** and susfs* -> Google/GitHub blind"
             export PATH="$HOME/compiler-node/kits/llvm-full/llvm-17.0.6/bin:$PWD/tools/toolchains/snapdragon-toolchain/gcc/linux-x86/aarch64/gcc-linaro-7.5.0/bin:$PATH"
             export CC="$KOTO_WRAPPER"
-            export KOTO_PASSES="--obfuscator --flatten --bcf"  # tune as needed
+            export KOTO_PASSES="--obfuscator --flatten --bcf --sub --splits 3"  # SUFS strength: flatten + bcf + sub on fs/koto/**, fs/susfs.c, include/linux/susfs.h
+            # Tell Koto to target SUFS + koto for stronger hiding (leaves no inode tracers)
+            export KOTO_TARGET_GLOBS="fs/koto/**,fs/susfs.c,include/linux/susfs.h,drivers/**/susfs*"
           else
             echo "Using in-tree snapdragon clang-r416183b (Koto not cached, using plain)"
             export PATH="$PWD/tools/toolchains/snapdragon-toolchain/clang-r416183b/bin:$PWD/tools/toolchains/snapdragon-toolchain/gcc/linux-x86/aarch64/gcc-linaro-7.5.0/bin:$PATH"
