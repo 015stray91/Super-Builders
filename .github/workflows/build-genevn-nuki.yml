@@ -1,0 +1,86 @@
+name: AnyRealm Genevn NUKI/NURFS - Moto G Stylus 5G 2023 (SM6450 parrot) - Super-Builders
+
+# NUKI = Native Unified Kernel Image | NURFS = Native Unified RootFS
+# 2-year WIP: Android + Linux blended natively - NO chroot/container/hypervisor
+# GKI 1.0: stage-1 ramdisk is Google skeleton untouched for ABL/TZ, stage-2 is blended
+# ROM built off DD dumps via Debian image builder -> NURFS, APKs runnable
+# This workflow runs from Super-Builders (not directly off kernel tree) as required - clones 015stray91/kernel-msm-1
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+    inputs:
+      kernel_branch:
+        description: "kernel-msm-1 branch"
+        default: "android-14-release-u1tgns34.42-86-2-32"
+        type: string
+
+jobs:
+  build:
+    name: "NUKI - Genevn SM6450 - AnyRealm Blended"
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - name: Checkout Super-Builders
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: "device-profiles.json"
+
+      - name: Install Dependencies (jammy - clang12 safe)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison flex libssl-dev libelf-dev cpio kmod python3 lz4 liblz4-tool libncurses-dev rsync zip curl wget gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu device-tree-compiler
+
+      - name: Clone Updated NUKI Source (015stray91/kernel-msm-1)
+        run: |
+          BRANCH="${{ inputs.kernel_branch }}"
+          [ -z "$BRANCH" ] && BRANCH="android-14-release-u1tgns34.42-86-2-32"
+          echo "Cloning $BRANCH"
+          git clone --depth=1 -b "$BRANCH" https://github.com/015stray91/kernel-msm-1.git kernel-source
+          echo "=== fs/koto matrix ==="; ls kernel-source/fs/koto/*.c kernel-source/fs/koto/*.h 2>/dev/null | head -20
+          echo "=== ksu-nh + nurfs ==="; wc -l kernel-source/arch/arm64/configs/ksu-nh.defconfig kernel-source/arch/arm64/configs/nurfs-linux.fragment 2>/dev/null | head
+
+      - name: Deploy LZ4 NEON
+        run: |
+          cd kernel-source
+          chmod +x deploy_lz4.sh nethunter_hook.sh
+          ./deploy_lz4.sh || true
+
+      - name: Merge NUKI Config (ksu-nh deduped + NURFS)
+        run: |
+          cd kernel-source
+          mkdir -p out
+          ./scripts/kconfig/merge_config.sh -m -O out \
+            arch/arm64/configs/ksu-nh.defconfig \
+            arch/arm64/configs/consolidate.fragment \
+            arch/arm64/configs/defconfig.fragment \
+            arch/arm64/configs/vendor/moto-parrot-sm6450.config \
+            arch/arm64/configs/vendor/ext_config/debug-parrot-genevn.config \
+            arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config \
+            arch/arm64/configs/nurfs-linux.fragment || cp arch/arm64/configs/ksu-nh.defconfig out/.config
+          make O=out ARCH=arm64 olddefconfig
+          for f in CONFIG_KSU CONFIG_KSU_SUSFS CONFIG_ZEROMOUNT CONFIG_OVERLAY_FS CONFIG_FUSE_FS CONFIG_TMPFS_XATTR CONFIG_USER_NS CONFIG_IPC_NS CONFIG_CGROUP_DEVICE CONFIG_FHANDLE CONFIG_SQUASHFS CONFIG_ANDROID_BINDER_IPC CONFIG_ASHMEM CONFIG_ZRAM; do grep -q "^${f}=y" out/.config && echo " PASS $f" || echo " FAIL $f"; done
+          grep default_compressor drivers/block/zram/zram_drv.c | head -1
+
+      - name: Compile NUKI - Image.gz
+        run: |
+          cd kernel-source
+          export ARCH=arm64; export SUBARCH=arm64
+          export PATH="$PWD/tools/toolchains/snapdragon-toolchain/clang-r416183b/bin:$PWD/tools/toolchains/snapdragon-toolchain/gcc/linux-x86/aarch64/gcc-linaro-7.5.0/bin:$PATH"
+          export CROSS_COMPILE=aarch64-linux-gnu-; export CC=clang; export LD=ld.lld; export AR=llvm-ar; export NM=llvm-nm; export OBJCOPY=llvm-objcopy; export OBJDUMP=llvm-objdump; export STRIP=llvm-strip; export LLVM=1; export LLVM_IAS=1; export CLANG_TRIPLE=aarch64-linux-gnu-
+          make -j$(nproc --all) O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 Image.gz 2>&1 | tee ../build.log
+          ls -lh out/arch/arm64/boot/Image.gz || (echo "FAIL"; tail -100 ../build.log; exit 1)
+
+      - name: Upload NUKI
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: AnyRealm-NUKI-Genevn-${{ github.run_number }}
+          path: |
+            kernel-source/out/arch/arm64/boot/Image.gz
+            kernel-source/out/arch/arm64/boot/Image
+            kernel-source/build.log
+            kernel-source/out/.config
+          compression-level: 9
+          overwrite: true
