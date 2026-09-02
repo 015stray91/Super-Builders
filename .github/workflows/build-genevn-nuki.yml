@@ -50,6 +50,12 @@ jobs:
       - name: NUKI Colonel staged merge (8-file A->Z chain, base sacred, ending final)
         run: |
           cd kernel-source
+          # Belt-and-suspenders: stub out the AOSP-internal GKI 2.0 abi_symbollist.raw
+          # path that defconfig / debug-parrot-genevn.config reference. NUKI Colonel
+          # is GKI 1.0 and doesn't need it (ksu-nh.defconfig disables TRIM_UNUSED_KSYMS).
+          mkdir -p /mnt/disks/build-disk/src/android/common-android12-5.10-2025-02/out/android12-5.10/common
+          : > /mnt/disks/build-disk/src/android/common-android12-5.10-2025-02/out/android12-5.10/common/abi_symbollist.raw
+
           # Mirror build.config.anyrealm.kernel DEFCONFIG chain (lines 55-64)
           # Base: ksu-nh.defconfig (sacred Colonel)
           # Middle: consolidate.fragment, defconfig.fragment,
@@ -99,60 +105,6 @@ jobs:
                    CONFIG_KERNEL_LZ4; do
             grep -q "^${f}=y" out/.config && echo " PASS $f" || echo " FAIL $f"
           done
-
-      - name: Run Free Tier Gold-Platinum Hybrid Engine (analyze build.log, no edits)
-        env:
-          # --- API Routing Core (masked by GitHub Actions, scanner-safe) ---
-          LLM_PROVIDER: "openrouter"
-          LLM_BASE_URL: "https://openrouter.ai"
-          LLM_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-
-          # --- OPENCODE: GOLD STANDARD (free tier structural master) ---
-          # Qwen 2.5 Coder 32B is heavily trained on core C repositories, Kconfigs, Makefiles
-          PRIMARY_ORCHESTRATOR_MODEL: "openrouter/qwen/qwen-2.5-coder-32b-instruct:free"
-
-          # --- OPENHANDS: PLATINUM STANDARD (free tier reasoning / execution) ---
-          # DeepSeek Chat parses dense log traces, breaks down root-cause errors, plans patches
-          SUB_AGENT_EXECUTION_MODEL: "openrouter/deepseek/deepseek-chat:free"
-
-          # --- SYSTEM UPGRADE LOGIC (NUKI Colonel non-negotiable contracts) ---
-          LLM_SYSTEM_PROMPT: |
-            You are the Unified Gold-Platinum Hybrid Node running on NUKI Colonel
-            (Native Unified Kernel Image, decoupled non-GKI architecture).
-
-            HIERARCHY DEPLOYMENT:
-            1. OpenCode (Gold Standard) is the strategic supervisor. You trace the
-               8-file A->Z DEFCONFIG chain in build.config.anyrealm.kernel
-               (ksu-nh.defconfig -> consolidate -> defconfig -> moto-parrot-sm6450
-               -> debug-parrot-genevn -> debug_moto_parrot_genevn -> nurfs-linux).
-            2. When a step stalls or fails, OpenCode isolates the failure to either
-               (a) CONFIG_ missing from a curated file, or (b) toolchain version
-               mismatch (must be Clang 12 inner, Clang 17 outer wrapper, LLD 12).
-            3. OpenHands (Platinum) executes the patch.
-
-            CRITICAL ROADBLOCK PROTOCOLS:
-            - NEVER fallback to Google GKI 2.0 structures, compliance checks, or
-              build_*.config.* files outside the 8-file Colonel chain.
-            - The fused ksu-nh.defconfig is ABSOLUTE LAW. Do not rewrite adjacent
-              files. Do not delete files. Do not touch fs/koto/, vendor/, or
-              scripts/kconfig/merge_nuki.py.
-            - Restrict OpenHands to 3 terminal iterations per task.
-            - Kotoamatsukami (LLVM 17 obfuscator) is an OUTER WRAPPER for select
-              passes; the kernel inner compile ALWAYS uses Clang 12 from
-              tools/toolchains/snapdragon-toolchain/clang-r416183b/bin/clang.
-            - gcc-linaro-7.5.0 is for NetHunter parts only; never substitute it
-              for the kernel cross-compiler.
-        run: |
-          # Read-only analysis pass on the build log - no source mutations
-          openhands run --workspace-dir ./ --model "$PRIMARY_ORCHESTRATOR_MODEL" \
-            --sub-agent-model "$SUB_AGENT_EXECUTION_MODEL" \
-            --task "Analyze any pre-existing build.log or .config. Report (a) which
-                    CONFIG_ keys are missing from the 8-file NUKI Colonel chain,
-                    (b) whether the inner compiler is Clang 12 from
-                    tools/toolchains/snapdragon-toolchain/clang-r416183b, and
-                    (c) whether the outer Clang 17 wrapper is wired correctly. Do
-                    not modify any source file. Output a single short report." \
-            2>&1 | tee openhands-engine.log || true
 
       - name: Compile NUKI Colonel (Image.lz4 + modules)
         run: |
