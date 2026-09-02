@@ -152,6 +152,9 @@ jobs:
           sed -i 's|^CONFIG_SYSTEM_TRUSTED_KEYS=.*|CONFIG_SYSTEM_TRUSTED_KEYS=""|' out/.config
           sed -i 's|^CONFIG_SYSTEM_REVOCATION_KEYS=.*|CONFIG_SYSTEM_REVOCATION_KEYS=""|' out/.config
           sed -i 's/^CONFIG_KERNEL_MODE_NEON=y/# CONFIG_KERNEL_MODE_NEON is not set/' out/.config
+          # CIFS_SMBD conflicts with cifs_listxattr (cifsfs.h #define cifs_listxattr NULL
+          # when SMBD is on, then xattr.c redefines function = syntax error)
+          sed -i 's/^CONFIG_CIFS_SMBD=y/# CONFIG_CIFS_SMBD is not set/' out/.config
           # Ensure QCOM_SMEM and SCHED_WALT are enabled (fixes source-level dependencies)
           grep -q "^# CONFIG_QCOM_SMEM is not set" out/.config && \
             sed -i 's/^# CONFIG_QCOM_SMEM is not set/CONFIG_QCOM_SMEM=y/' out/.config || true
