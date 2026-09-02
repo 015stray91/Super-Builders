@@ -123,20 +123,22 @@ jobs:
         run: |
           cd kernel-source
           export ARCH=arm64; export SUBARCH=arm64
+          # PATH snapdragon ld.lld + tools BEFORE everything (Kconfig syncconfig runs early, needs ld.lld in PATH)
+          export PATH="$HOME/bin:$PWD/tools/toolchains/snapdragon-toolchain/clang-r416183b/bin:$PWD/tools/toolchains/snapdragon-toolchain/gcc/linux-x86/aarch64/gcc-linaro-7.5.0/bin:$PATH"
           # Use full compiler-node if Koto wrapper is present (the stupefier from llvm-17-plugins) - helps SUFS become stronger via Mist
           if [ -x "$KOTO_WRAPPER" ] && [ -x "$HOME/compiler-node/kits/llvm-full/llvm-17.0.6/bin/clang-17" ]; then
             echo "Using Kotoamatsukami LLVM-17 obfuscator (stupefier) to help SUFS - Mist over fs/koto/** and susfs* -> Google/GitHub blind"
-            export PATH="$HOME/compiler-node/kits/llvm-full/llvm-17.0.6/bin:$PWD/tools/toolchains/snapdragon-toolchain/gcc/linux-x86/aarch64/gcc-linaro-7.5.0/bin:$PATH"
+            export PATH="$HOME/compiler-node/kits/llvm-full/llvm-17.0.6/bin:$PATH"
             export CC="$KOTO_WRAPPER"
             export KOTO_PASSES="--obfuscator --flatten --bcf --sub --splits 3"  # SUFS strength: flatten + bcf + sub on fs/koto/**, fs/susfs.c, include/linux/susfs.h
             # Tell Koto to target SUFS + koto for stronger hiding (leaves no inode tracers)
             export KOTO_TARGET_GLOBS="fs/koto/**,fs/susfs.c,include/linux/susfs.h,drivers/**/susfs*"
           else
             echo "Using in-tree snapdragon clang-r416183b (Koto not cached, using plain)"
-            export PATH="$PWD/tools/toolchains/snapdragon-toolchain/clang-r416183b/bin:$PWD/tools/toolchains/snapdragon-toolchain/gcc/linux-x86/aarch64/gcc-linaro-7.5.0/bin:$PATH"
             export CC=clang
           fi
           export CROSS_COMPILE=aarch64-linux-gnu-; export LD=ld.lld; export AR=llvm-ar; export NM=llvm-nm; export OBJCOPY=llvm-objcopy; export OBJDUMP=llvm-objdump; export STRIP=llvm-strip; export LLVM=1; export LLVM_IAS=1; export CLANG_TRIPLE=aarch64-linux-gnu-
+          which ld.lld && ld.lld --version | head -1
           make -j$(nproc --all) O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$CC" LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 Image.gz 2>&1 | tee ../build.log
           ls -lh out/arch/arm64/boot/Image.gz || (echo "FAIL"; tail -100 ../build.log; exit 1)
 
