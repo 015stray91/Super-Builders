@@ -161,10 +161,22 @@ diff --git a/fs/notify/fdinfo.c b/fs/notify/fdinfo.c
 index 5a55b860ca673..88273cbb1e5ff 100755
 --- a/fs/notify/fdinfo.c
 +++ b/fs/notify/fdinfo.c
-@@ -154,7 +154,7 @@ void inotify_show_fdinfo(struct seq_file *m, struct file *f)
- 
+@@ -89,7 +89,11 @@ static void show_mark_fhandle(struct seq_file *m, struct inode *inode)
+ }
+ #endif
+
++#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
++static void inotify_fdinfo(struct seq_file *m, struct fsnotify_mark *mark, struct file *file)
++#else
+ static void inotify_fdinfo(struct seq_file *m, struct fsnotify_mark *mark)
++#endif
+ {
+ 	struct inotify_inode_mark *inode_mark;
+ 	struct inode *inode;
+@@ -154,7 +158,7 @@ void inotify_show_fdinfo(struct seq_file *m, struct file *f)
+
  #ifdef CONFIG_FANOTIFY
- 
+
 -static void fanotify_fdinfo(struct seq_file *m, struct fsnotify_mark *mark)
 +static void fanotify_fdinfo(struct seq_file *m, struct fsnotify_mark *mark, struct file *file)
  {
