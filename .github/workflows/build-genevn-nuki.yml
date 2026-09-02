@@ -35,8 +35,21 @@ jobs:
         run: |
           BRANCH="${{ inputs.kernel_branch }}"
           [ -z "$BRANCH" ] && BRANCH="android-14-release-u1tgns34.42-86-2-32"
-          git clone --depth=1 -b "$BRANCH" https://github.com/015stray91/kernel-msm-1.git kernel-source
-          echo "=== Toolchain ==="; ls kernel-source/tools/toolchains/snapdragon-toolchain/clang-r416183b/bin/ | head -5
+          git clone --depth=1 --recurse-submodules -b "$BRANCH" https://github.com/015stray91/kernel-msm-1.git kernel-source
+          # If submodule pull failed (often happens with private submodules), initialize manually
+          if [ ! -d "kernel-source/tools/toolchains/snapdragon-toolchain/clang-r416183b" ]; then
+            echo "Submodule not pulled - initializing manually"
+            cd kernel-source
+            git submodule update --init --depth=1 tools/toolchains/snapdragon-toolchain || \
+              (echo "Submodule private, using local copy" && \
+               cp -r /tmp/snapdragon-toolchain tools/toolchains/ 2>/dev/null || \
+                wget -q -O /tmp/sdclang.tar.xz "https://github.com/015stray91/snapdragon-toolchain/archive/refs/heads/main.tar.xz" && \
+                mkdir -p tools/toolchains/snapdragon-toolchain && tar -xJf /tmp/sdclang.tar.xz -C tools/toolchains/snapdragon-toolchain --strip-components=1)
+            cd ..
+          fi
+          echo "=== Toolchain ==="; ls kernel-source/tools/toolchains/snapdragon-toolchain/clang-r416183b/bin/ 2>/dev/null | head -5
+          echo "=== llvm-ar exists: ==="
+          ls -l kernel-source/tools/toolchains/snapdragon-toolchain/clang-r416183b/bin/llvm-ar 2>&1 | head -2
           echo "=== Curated configs ==="
           wc -l kernel-source/arch/arm64/configs/ksu-nh.defconfig kernel-source/arch/arm64/configs/nurfs-linux.fragment
           echo "=== Makefile HOSTCC ==="; grep -A2 "HOSTCC" kernel-source/Makefile | head -8
