@@ -103,26 +103,26 @@ jobs:
           chmod +x deploy_lz4.sh nethunter_hook.sh
           ./deploy_lz4.sh || true
 
-      - name: Merge NUKI Config (ksu-nh deduped + NURFS) - sequential buildup
+      - name: Merge NUKI Config (ksu-nh + NURFS, cumulative, no flag lost)
         run: |
           cd kernel-source
           mkdir -p out
-          # Sequential buildup merge: base -> middle -> ending, no flag lost
-          # 4 clean curated files, NO overlap (separated by category)
-          #   ksu-nh.defconfig - KSU Colonel (KSU/SUSFS/ZeroMount/KPM EUD/FUSE/OVERLAY/ZRAM/KALLSYMS)
-          #   vendor/moto-parrot-sm6450.config - Qualcomm SM6450 (QCOM_*/RPMH/SPMI/SMEM/etc)
-          #   vendor/ext_config/debug_moto_parrot_genevn.config - Moto G Stylus 5G 2023 device
-          #   nurfs-linux.fragment - NURFS Linux additions (CUSE/FHANDLE/CGROUP_*/SQUASHFS/etc)
+          # Full cumulative merge chain (matches nethunter_hook.sh)
+          # 8 files: base sacred -> middle staged -> ending final, last-wins
+          #   base:    ksu-nh.defconfig (KSU Colonel sacred)
+          #   middle:  consolidate.fragment, defconfig.fragment, vendor/moto-parrot-sm6450.config,
+          #            vendor/ext_config/debug-parrot-genevn.config (Qualcomm + Genevn base)
+          #   ending:  vendor/ext_config/debug_moto_parrot_genevn.config, nurfs-linux.fragment
           python3 scripts/kconfig/merge_nuki.py \
             --base arch/arm64/configs/ksu-nh.defconfig \
-            --middle arch/arm64/configs/vendor/moto-parrot-sm6450.config \
+            --middle arch/arm64/configs/consolidate.fragment arch/arm64/configs/defconfig.fragment arch/arm64/configs/vendor/moto-parrot-sm6450.config arch/arm64/configs/vendor/ext_config/debug-parrot-genevn.config \
             --ending arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config arch/arm64/configs/nurfs-linux.fragment \
             -o out/.config || cp arch/arm64/configs/ksu-nh.defconfig out/.config
-          echo "=== Union merge complete ==="
+          echo "=== Cumulative merge complete ==="
           grep -cE "^CONFIG_" out/.config
-          # Force KALLSYMS=y (KSU-Next needs it for live symbol resolution, may be lost in merge)
+          # Force KALLSYMS=y (KSU-Next needs it for live symbol resolution)
           grep -q "^CONFIG_KALLSYMS=y" out/.config || echo "CONFIG_KALLSYMS=y" >> out/.config
-          for f in CONFIG_KSU CONFIG_KSU_SUSFS CONFIG_ZEROMOUNT CONFIG_OVERLAY_FS CONFIG_FUSE_FS CONFIG_TMPFS_XATTR CONFIG_USER_NS CONFIG_IPC_NS CONFIG_CGROUP_DEVICE CONFIG_FHANDLE CONFIG_SQUASHFS CONFIG_ANDROID_BINDER_IPC CONFIG_ASHMEM CONFIG_ZRAM CONFIG_KALLSYMS; do grep -q "^${f}=y" out/.config && echo " PASS $f" || echo " FAIL $f"; done
+          for f in CONFIG_KSU CONFIG_KSU_SUSFS CONFIG_ZEROMOUNT CONFIG_OVERLAY_FS CONFIG_FUSE_FS CONFIG_TMPFS_XATTR CONFIG_USER_NS CONFIG_IPC_NS CONFIG_CGROUP_DEVICE CONFIG_FHANDLE CONFIG_SQUASHFS CONFIG_ANDROID_BINDER_IPC CONFIG_ASHMEM CONFIG_ZRAM CONFIG_KALLSYMS CONFIG_MODULES CONFIG_ARM64 CONFIG_64BIT; do grep -q "^${f}=y" out/.config && echo " PASS $f" || echo " FAIL $f"; done
           grep default_compressor drivers/block/zram/zram_drv.c | head -1
 
       - name: OEM ABI Bypass (disable TRIM_UNUSED_KSYMS and ANDROID_SYMLINKS)
