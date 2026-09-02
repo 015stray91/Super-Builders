@@ -14,14 +14,14 @@
       "vendor_config": "arch/arm64/configs/vendor/moto-parrot-sm6450.config",
       "debug_config": "arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config",
       "nurfs_fragment": "arch/arm64/configs/nurfs-linux.fragment",
-      "nethunter_patches": "kali-nethunter-kernel-builder-main/patches/ksu a12-5.10 patches",
+      "nethunter_patches": "",
       "anykernel": "https://github.com/015stray91/Genevn-sm6450_AnyKernel.git",
       "add_susfs": true,
       "add_zeromount": true,
       "add_zram": true,
       "add_overlayfs": true,
       "add_kpm": true,
-      "add_nethunter": true
+      "add_nethunter": false
     },
     "lake": {
       "name": "Xiaomi Redmi 14C",

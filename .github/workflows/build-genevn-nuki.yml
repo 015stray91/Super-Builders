@@ -2,9 +2,18 @@ name: AnyRealm NUKI Colonel - Moto G Stylus 5G 2023 (SM6450 parrot)
 
 # NUKI Colonel = Native Unified Kernel Image, Colonel variant
 # NURFS = Native Unified RootFS (Debian-blended userland)
-# Fully decoupled from upstream parrot/moto/waipio GKI inheritance.
-# No vendor DLKM, no GKI 2.0, no compliance fallbacks.
-# Mirrors /mnt/sda2/kernel-msm-1/build.config.anyrealm.kernel exactly.
+# GKI 1.0 device (SM6450 parrot). Fully decoupled from upstream GKI.
+# No GKI 2.0 build.config.* fragments. No olddefconfig. No alldefconfig.
+#
+# Build layers (in order):
+#   1. Logic    = CONFIG_* flags (9-file DEFCONFIG chain via merge_nuki.py)
+#   2. Movement = .c/.h source files (fs/koto/, susfs.c, zeromount.c, etc.)
+#   3. Seal     = KernelSU-Next Ksu-patches/*.patch (applied before compile)
+#
+# Toolchain:
+#   Inner  = Clang 12.0.5  (tools/toolchains/snapdragon-toolchain/clang-r416183b/)
+#   Outer  = Clang 17 + Kotoamatsukami plugin (select passes only)
+#   GCC    = Linaro 7.5.0   (NetHunter userspace parts only)
 
 on:
   push:
@@ -33,37 +42,53 @@ jobs:
           sudo ln -sf /usr/bin/ld.lld-12 /usr/local/bin/ld.lld
           sudo ln -sf /usr/bin/ld.lld-12 /usr/local/bin/ld64.lld
 
-      - name: Clone NUKI Source + android-kernel-tools
+      - name: Clone NUKI Source
         run: |
           BRANCH="${{ inputs.kernel_branch }}"
           [ -z "$BRANCH" ] && BRANCH="android-14-release-u1tgns34.42-86-2-32"
           echo "Cloning kernel source $BRANCH"
           git clone --depth=1 -b "$BRANCH" https://github.com/015stray91/kernel-msm-1.git kernel-source
-          # DO NOT nuke snapdragon-toolchain - it is the in-tree Clang 12 (inner compiler)
-          echo "=== In-tree toolchain preserved ==="
+          echo "=== In-tree toolchain (Clang 12 inner compiler) ==="
           ls kernel-source/tools/toolchains/snapdragon-toolchain/
-          echo "=== Kotoamatsukami outer wrapper probe (local only) ==="
-          [ -d /home/slm015/compiler-node/fetched/Kotoamatsukami ] && \
-            ls /home/slm015/compiler-node/fetched/Kotoamatsukami/bin/build/Kotoamatsukami.so || \
-            echo "Kotoamatsukami.so: source-only (built locally)"
 
-      - name: NUKI Colonel staged merge (8-file A->Z chain, base sacred, ending final)
+      - name: Clone KernelSU-Next (seal + build helpers, no submodule)
         run: |
           cd kernel-source
-          # Belt-and-suspenders: stub out the AOSP-internal GKI 2.0 abi_symbollist.raw
-          # path that defconfig / debug-parrot-genevn.config reference. NUKI Colonel
-          # is GKI 1.0 and doesn't need it (ksu-nh.defconfig disables TRIM_UNUSED_KSYMS).
-          mkdir -p out
-          # Clear any hardcoded GKI abi_whitelist path in the merged .config
-          sed -i 's|CONFIG_UNUSED_KSYMS_WHITELIST=.*|CONFIG_UNUSED_KSYMS_WHITELIST=""|g' out/.config 2>/dev/null || true
-          sed -i 's|CONFIG_UNUSED_KSYMS_WHITELIST=.*|CONFIG_UNUSED_KSYMS_WHITELIST=|g' out/.config 2>/dev/null || true
-          grep "KSYMS_WHITELIST" out/.config || echo " UNUSED_KSYMS_WHITELIST: not set (good)"
+          # Clone Ksu-patches (the Colonel seal layer)
+          git clone --depth=1 \
+            https://github.com/015stray91/kernel-msm-1.git \
+            --filter=blob:none \
+            --sparse \
+            KernelSU-Next-tmp
+          cd KernelSU-Next-tmp
+          git sparse-checkout set KernelSU-Next/Ksu-patches KernelSU-Next/build-helpers
+          mv KernelSU-Next ..
+          cd .. && rm -rf KernelSU-Next-tmp
+          echo "=== Ksu-patches (seal) ==="
+          ls KernelSU-Next/Ksu-patches/
+          echo "=== build-helpers ==="
+          ls KernelSU-Next/build-helpers/
 
-          # Mirror build.config.anyrealm.kernel DEFCONFIG chain (lines 55-64)
-          # merge_nuki.py uses positional fallback when no --flags: first=base, last 2=ending, rest=middle
-          # Base: ksu-nh.defconfig (sacred Colonel)
-          # Middle: consolidate.fragment, defconfig.fragment, moto-parrot-sm6450.config, debug-parrot-genevn.config
-          # Ending: debug_moto_parrot_genevn.config, nurfs-linux.fragment
+      - name: Apply NUKI Colonel Seal (Ksu-patches/*.patch)
+        run: |
+          cd kernel-source
+          # Apply KernelSU-Next seal patches in order
+          # (10_susfs -> 50_susfs -> 51_enhanced -> 60_zeromount -> 65_adb_filter -> 70_ksu_safety)
+          for patch in KernelSU-Next/Ksu-patches/*.patch; do
+            [ -f "$patch" ] || continue
+            echo "Applying: $(basename $patch)"
+            patch -p1 -F3 --forward < "$patch" || true
+          done
+          echo "Seal applied."
+
+      - name: Assemble NUKI Colonel config (9-file A->Z chain)
+        run: |
+          cd kernel-source
+          mkdir -p out
+
+          # 9-file DEFCONFIG chain from build.config.anyrealm.kernel DEFCONFIG_FRAGMENTS:
+          #   ksu-nh.defconfig (base) + consolidate + defconfig + moto-parrot-sm6450
+          #   + debug-parrot-genevn + debug_moto_parrot_genevn + nurfs-linux (ending)
           python3 scripts/kconfig/merge_nuki.py \
             arch/arm64/configs/ksu-nh.defconfig \
             arch/arm64/configs/consolidate.fragment \
@@ -74,7 +99,7 @@ jobs:
             arch/arm64/configs/nurfs-linux.fragment \
             -o out/.config
 
-          # LZ4 NEON deployment (kernel Colonel compression, from deploy_lz4.sh)
+          # LZ4 NEON deployment (from deploy_lz4.sh)
           [ -f deploy_lz4.sh ] && chmod +x deploy_lz4.sh && ./deploy_lz4.sh || echo "no deploy_lz4.sh"
 
           echo "=== Final .config: $(grep -c '^CONFIG_' out/.config) CONFIGs ==="
@@ -91,8 +116,9 @@ jobs:
       - name: Compile NUKI Colonel (Image.lz4 + modules)
         run: |
           cd kernel-source
-          # Mirror build.config.anyrealm.kernel MAKE_GOALS exactly:
-          #   Image.lz4 + modules, Clang 12 inner, LLVM=1, LLVM_IAS=1
+          # MAKE_GOALS: Image.lz4 + modules
+          # Inner compiler: Clang 12, LLD 12, LLVM=1, LLVM_IAS=1
+          # Outer wrapper: Clang 17 + Kotoamatsukami for select obfuscation passes
           export ARCH=arm64
           export SUBARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
@@ -107,128 +133,7 @@ jobs:
           export STRIP=llvm-strip
           export CLANG_TRIPLE=aarch64-linux-gnu-
 
-          # Pure compile: .config already complete from merge_nuki.py - no Kconfig prompts
-          # Also export all Colonel sacred CONFIG_* from build.config.anyrealm.kernel
-          # (Parts 1-12) so kernel Makefile sees them as env vars (override .config).
-          set -a
-          # Part 1: Colonel compression & performance
-          export CONFIG_KERNEL_LZ4=y
-          export CONFIG_ZRAM=y
-          export CONFIG_ZSMALLOC=y
-          export CONFIG_ZCOMP_LZ4K=y
-          export CONFIG_CPU_FREQ_GOV_PERFORMANCE=y
-          export CONFIG_QCOM_EUD=y
-          # Part 2: KernelSU + SUSFS (sacred Colonel flags)
-          export CONFIG_KPROBES=y
-          export CONFIG_KPROBE_EVENTS=y
-          export CONFIG_KSU=y
-          export CONFIG_KSU_SUSFS=y
-          export CONFIG_KSU_SUSFS_HAS_MEM_PAGES=y
-          export CONFIG_KSU_SUSFS_SUS_MOUNT=y
-          export CONFIG_KSU_SUSFS_ZERO_MOUNT=y
-          export CONFIG_KSU_SUSFS_SPOOF_KSTAT=y
-          export CONFIG_KSU_SUSFS_SUS_KSTAT=y
-          export CONFIG_KSU_SUSFS_SUS_KSTAT_REDIRECT=y
-          export CONFIG_KSU_SUSFS_SUS_MAP=y
-          export CONFIG_KSU_SUSFS_SPOOF_UNAME=y
-          export CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
-          export CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
-          export CONFIG_KSU_SUSFS_OPENAT=y
-          export CONFIG_KSU_SUSFS_OPENAT2=y
-          export CONFIG_KSU_SUSFS_GETDENTS=y
-          export CONFIG_KSU_SUSFS_HARDENED=y
-          export CONFIG_KSU_SUSFS_HIDDEN_NAME=y
-          export CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
-          export CONFIG_KSU_SUSFS_UNICODE_FILTER=y
-          export CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
-          export CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
-          export CONFIG_KSU_SUSFS_ENABLE_LOG=y
-          export CONFIG_KSU_SUSFS_SUS_PATH=y
-          export CONFIG_KSU_SUSFS_STAT=y
-          # Part 3: ZeroMount
-          export CONFIG_ZEROMOUNT=y
-          # Part 4: OverlayFS / FUSE / TMPFS_XATTR
-          export CONFIG_OVERLAY_FS=y
-          export CONFIG_OVERLAY_FS_REDIRECT_ALWAYS_FOLLOW=y
-          export CONFIG_FUSE_FS=y
-          export CONFIG_FUSE_DAX=y
-          export CONFIG_TMPFS_XATTR=y
-          export CONFIG_TMPFS_POSIX_ACL=y
-          # Part 5: NetHunter attack module drivers
-          export CONFIG_USB_GADGET=y
-          export CONFIG_USB_CONFIGFS=y
-          export CONFIG_USB_CONFIGFS_F_HID=y
-          export CONFIG_UHID=y
-          export CONFIG_NET=y
-          export CONFIG_WIRELESS=y
-          export CONFIG_CFG80211=m
-          export CONFIG_MAC80211=m
-          export CONFIG_NL80211_TESTMODE=y
-          export CONFIG_NETFILTER=y
-          export CONFIG_IP_NF_MANGLE=y
-          export CONFIG_IP6_NF_MANGLE=y
-          # Part 6: NURFS native Linux
-          export CONFIG_BINFMT_MISC=y
-          export CONFIG_BINFMT_ELF=y
-          export CONFIG_COMPAT_BINFMT_ELF=y
-          export CONFIG_DEVTMPFS_MOUNT=y
-          export CONFIG_USER_NS=y
-          export CONFIG_IPC_NS=y
-          export CONFIG_PID_NS=y
-          export CONFIG_NET_NS=y
-          export CONFIG_CGROUP_DEVICE=y
-          export CONFIG_CGROUP_PIDS=y
-          export CONFIG_CGROUP_FREEZER=y
-          export CONFIG_CPUSETS=y
-          export CONFIG_FHANDLE=y
-          export CONFIG_EVENTFD=y
-          export CONFIG_INOTIFY_USER=y
-          export CONFIG_SIGNALFD=y
-          export CONFIG_TIMERFD=y
-          export CONFIG_EPOLL=y
-          export CONFIG_FILE_LOCKING=y
-          export CONFIG_FUTEX=y
-          export CONFIG_FUTEX2=y
-          export CONFIG_CHECKPOINT_RESTORE=y
-          export CONFIG_NAMESPACES=y
-          export CONFIG_UTS_NS=y
-          export CONFIG_MNT_NS=y
-          # Part 7: Native Linux FS (NURFS)
-          export CONFIG_CUSE=y
-          export CONFIG_SQUASHFS=y
-          export CONFIG_SQUASHFS_FILE_CACHE=y
-          export CONFIG_SQUASHFS_FILE_DIRECT=y
-          export CONFIG_SQUASHFS_DECOMP_MULTI_PERCPU=y
-          export CONFIG_NTFS_FS=y
-          export CONFIG_NTFS_RW=y
-          export CONFIG_EXFAT_FS=y
-          export CONFIG_CIFS=y
-          export CONFIG_CIFS_XATTR=y
-          export CONFIG_NLS=y
-          export CONFIG_NLS_CODEPAGE_437=y
-          export CONFIG_NLS_ISO8859_1=y
-          export CONFIG_NLS_UTF8=y
-          # Part 8: ZRAM compressors
-          export CONFIG_ZRAM_WRITEBACK=y
-          export CONFIG_CRYPTO_LZ4=y
-          export CONFIG_CRYPTO_ZSTD=y
-          export CONFIG_CRYPTO_LZO=y
-          export CONFIG_CRYPTO_LZ4HC=y
-          # Part 9: Required for loadable modules
-          export CONFIG_MODULES=y
-          export CONFIG_MODULE_UNLOAD=y
-          export CONFIG_MODVERSIONS=y
-          export CONFIG_KALLSYMS=y
-          # Part 10: KPM (Kernel Patch Module) - loadable .ko support
-          export CONFIG_KPM=y
-          # Part 11: HIDELKM (hide loadable modules from /proc/modules)
-          export CONFIG_HIDELKM=y
-          # Part 12: Kotoamatsukami obfuscation target (LKM ftrace hook)
-          export CONFIG_FTRACE=y
-          export CONFIG_FUNCTION_TRACER=y
-          export CONFIG_DYNAMIC_FTRACE=y
-          set +a
-
+          # Pure compile: .config complete from merge_nuki.py - no Kconfig prompts
           make O=out ARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CC=clang LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- \
