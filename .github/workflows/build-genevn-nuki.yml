@@ -52,6 +52,7 @@ jobs:
       - name: "Merge NUKI Config (A→Z cumulative)"
         run: |
           cd kernel-source
+          export PATH="$PWD/tools/toolchains/snapdragon-toolchain/clang-r416183b/bin:$PWD/tools/toolchains/snapdragon-toolchain/gcc/linux-x86/aarch64/gcc-linaro-7.5.0/bin:$PATH"
           mkdir -p out
           # A→Z cumulative merge - last layer wins for any conflict
           # NO defconfig (GKI 6749-line bloated base) - use ksu-nh.defconfig instead
@@ -61,9 +62,18 @@ jobs:
             --middle arch/arm64/configs/vendor/moto-parrot-sm6450.config \
             --ending arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config arch/arm64/configs/nurfs-linux.fragment \
             -o out/.config
-          # Fill Kconfig gaps with defaults so olddefconfig has no questions
-          yes "" | make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang LLVM=-12 LLVM_IAS=-12 alldefconfig 2>&1 | tail -3
+          # alldefconfig fills Kconfig gaps with defaults - then we re-apply curated overrides
+          # Use 'silentoldconfig' (not olddefconfig) - it doesn't prompt for NEW entries
+          make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang HOSTCC=gcc LLVM=-12 LLVM_IAS=-12 alldefconfig 2>&1 | tail -3
           # Re-apply curated overrides on top of alldefconfig defaults
+          python3 scripts/kconfig/merge_nuki.py \
+            --base arch/arm64/configs/ksu-nh.defconfig \
+            --middle arch/arm64/configs/vendor/moto-parrot-sm6450.config \
+            --ending arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config arch/arm64/configs/nurfs-linux.fragment \
+            -o out/.config
+          # silentoldconfig will NOT prompt (no tty issue), it just picks defaults silently
+          make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang HOSTCC=gcc LLVM=-12 LLVM_IAS=-12 silentoldconfig 2>&1 | tail -3
+          # Re-apply curated overrides one more time in case silentoldconfig dropped any
           python3 scripts/kconfig/merge_nuki.py \
             --base arch/arm64/configs/ksu-nh.defconfig \
             --middle arch/arm64/configs/vendor/moto-parrot-sm6450.config \
@@ -77,12 +87,19 @@ jobs:
       - name: Compile NUKI (root Makefile handles toolchain + HOSTCC=gcc)
         run: |
           cd kernel-source
-          # Put snapdragon-toolchain on PATH FIRST so recursive make finds llvm-ar/llvm-nm/llvm-objdump
-          # Root Makefile's CC/LD/AR etc are exported, but recursive make re-spawns from out/ subdir
+          # Prepend snapdragon-toolchain bin to PATH so recursive make finds llvm-ar/llvm-nm/llvm-objdump
+          # The exported CC/LD/AR in root Makefile are visible to make but not to subprocess shells
           export PATH="$PWD/tools/toolchains/snapdragon-toolchain/clang-r416183b/bin:$PWD/tools/toolchains/snapdragon-toolchain/gcc/linux-x86/aarch64/gcc-linaro-7.5.0/bin:$PATH"
-          # Just run make; no env vars needed.
-          yes "" | make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
-            -j$(nproc --all) Image.lz4 modules 2>&1 | tee ../build.log
+          # Verify toolchain is reachable from this shell
+          which clang llvm-ar llvm-nm llvm-objdump clang-12 ld.lld aarch64-linux-gnu-gcc 2>&1 | head -10
+          # silentoldconfig avoids tty prompts (uses defaults for NEW entries)
+          make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CC=clang HOSTCC=gcc LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CLANG_TRIPLE=aarch64-linux-gnu- LLVM=-12 LLVM_IAS=-12 \
+            silentoldconfig 2>&1 | tail -3
+          # Now full build - silentoldconfig already resolved all Kconfig questions
+          make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            -j$(nproc --all) CC=clang HOSTCC=gcc LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CLANG_TRIPLE=aarch64-linux-gnu- LLVM=-12 LLVM_IAS=-12 \
+            Image.lz4 modules 2>&1 | tee ../build.log
           ls -lh out/arch/arm64/boot/Image.lz4 || (echo "FAIL"; tail -100 ../build.log; exit 1)
           mkdir -p ../modules
           find out -name "*.ko" -exec cp {} ../modules/ \;
