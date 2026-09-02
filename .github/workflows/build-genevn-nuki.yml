@@ -27,11 +27,12 @@ jobs:
       - name: Install Dependencies (jammy - clang12 safe)
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison flex libssl-dev libelf-dev cpio kmod python3 \
+          sudo apt-get install -y bc bison flex libssl-dev libelf-dev cpio kmod python3 python-is-python3 \
             lz4 liblz4-tool libncurses-dev rsync zip curl wget make device-tree-compiler \
             gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu lld-12 llvm-12 git-lfs
           sudo ln -sf /usr/bin/ld.lld-12 /usr/local/bin/ld.lld
           sudo ln -sf /usr/bin/ld.lld-12 /usr/local/bin/ld64.lld
+          sudo ln -sf /usr/bin/python3 /usr/local/bin/python
 
       - name: Clone NUKI Source + android-kernel-tools
         run: |
@@ -137,6 +138,25 @@ jobs:
 
           # LZ4 NEON deployment (kernel Colonel compression, from deploy_lz4.sh)
           [ -f deploy_lz4.sh ] && chmod +x deploy_lz4.sh && ./deploy_lz4.sh || echo "no deploy_lz4.sh"
+
+          # Post-process .config: disable problematic GKI options and fix sparse-config issues
+          # - WERROR: causes build failures on minor warnings
+          # - SYSTEM_TRUSTED_KEYRING: needs debian/canonical-certs.pem (not in tree)
+          # - KERNEL_MODE_NEON: LZ4 ARM64 NEON path is broken (deploy_lz4.sh provides alt)
+          # - TRIM_UNUSED_KSYMS: disabled via ksu-nh.defconfig
+          # - QCOM_SMEM: needed by soc_sleep_stats subsystem array
+          # - SCHED_WALT: needed by QCOM DCVS (core_ctl_notif_data struct)
+          echo "=== Post-process .config ==="
+          sed -i 's/^CONFIG_WERROR=y/# CONFIG_WERROR is not set/' out/.config
+          sed -i 's/^CONFIG_SYSTEM_TRUSTED_KEYRING=y/# CONFIG_SYSTEM_TRUSTED_KEYRING is not set/' out/.config
+          sed -i 's|^CONFIG_SYSTEM_TRUSTED_KEYS=.*|CONFIG_SYSTEM_TRUSTED_KEYS=""|' out/.config
+          sed -i 's|^CONFIG_SYSTEM_REVOCATION_KEYS=.*|CONFIG_SYSTEM_REVOCATION_KEYS=""|' out/.config
+          sed -i 's/^CONFIG_KERNEL_MODE_NEON=y/# CONFIG_KERNEL_MODE_NEON is not set/' out/.config
+          # Ensure QCOM_SMEM and SCHED_WALT are enabled (fixes source-level dependencies)
+          grep -q "^# CONFIG_QCOM_SMEM is not set" out/.config && \
+            sed -i 's/^# CONFIG_QCOM_SMEM is not set/CONFIG_QCOM_SMEM=y/' out/.config || true
+          grep -q "^# CONFIG_SCHED_WALT is not set" out/.config && \
+            sed -i 's/^# CONFIG_SCHED_WALT is not set/CONFIG_SCHED_WALT=y/' out/.config || true
 
           echo "=== Final .config: $(grep -c '^CONFIG_' out/.config) CONFIGs ==="
           for f in CONFIG_KSU CONFIG_KSU_SUSFS CONFIG_KSU_SUSFS_SUS_MOUNT CONFIG_KSU_SUSFS_HARDENED \
