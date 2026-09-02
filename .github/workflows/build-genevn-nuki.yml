@@ -114,27 +114,18 @@ jobs:
 
            # Direct fix: ensure inotify_fdinfo uses 3-arg form when KSU_SUSFS_SUS_MOUNT=y
            echo "=== Direct fdinfo.c fix (inotify_fdinfo 3-arg sig) ==="
-           python3 << 'PYFIX'
-import re
-with open("fs/notify/fdinfo.c", "r") as f:
-    content = f.read()
-
-old = "static void inotify_fdinfo(struct seq_file *m, struct fsnotify_mark *mark)\n{"
-new = """#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
-static void inotify_fdinfo(struct seq_file *m, struct fsnotify_mark *mark, struct file *file)
-#else
-static void inotify_fdinfo(struct seq_file *m, struct fsnotify_mark *mark)
-#endif
-{"""
-
-if old in content:
-    content = content.replace(old, new)
-    with open("fs/notify/fdinfo.c", "w") as f:
-        f.write(content)
-    print("  + Patched inotify_fdinfo signature")
-else:
-    print("  - inotify_fdinfo already has 3-arg form or different structure")
-PYFIX
+           awk '
+             /^static void inotify_fdinfo\(struct seq_file \*m, struct fsnotify_mark \*mark\)$/ {
+               print "#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT";
+               print "static void inotify_fdinfo(struct seq_file *m, struct fsnotify_mark *mark, struct file *file)";
+               print "#else";
+               print;
+               print "#endif";
+               next
+             }
+             { print }
+           ' fs/notify/fdinfo.c > fs/notify/fdinfo.c.tmp && mv fs/notify/fdinfo.c.tmp fs/notify/fdinfo.c
+           if grep -q "file \*file" fs/notify/fdinfo.c; then echo "  + inotify_fdinfo signature patched"; else echo "  ! patch not applied"; fi
 
            # 5) fix-susfs-compat: post-patch runtime compatibility fixes
           #    (show_pad label, inotify_mark_user_mask, i_uid_into_mnt, etc.)
