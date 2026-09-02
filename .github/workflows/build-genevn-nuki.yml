@@ -57,20 +57,18 @@ jobs:
           : > /mnt/disks/build-disk/src/android/common-android12-5.10-2025-02/out/android12-5.10/common/abi_symbollist.raw
 
           # Mirror build.config.anyrealm.kernel DEFCONFIG chain (lines 55-64)
+          # merge_nuki.py uses positional fallback when no --flags: first=base, last 2=ending, rest=middle
           # Base: ksu-nh.defconfig (sacred Colonel)
-          # Middle: consolidate.fragment, defconfig.fragment,
-          #         vendor/moto-parrot-sm6450.config, vendor/ext_config/debug-parrot-genevn.config
-          # Ending: vendor/ext_config/debug_moto_parrot_genevn.config, nurfs-linux.fragment
+          # Middle: consolidate.fragment, defconfig.fragment, moto-parrot-sm6450.config, debug-parrot-genevn.config
+          # Ending: debug_moto_parrot_genevn.config, nurfs-linux.fragment
           python3 scripts/kconfig/merge_nuki.py \
-            --base arch/arm64/configs/ksu-nh.defconfig \
-            --middle \
-              arch/arm64/configs/consolidate.fragment \
-              arch/arm64/configs/defconfig.fragment \
-              arch/arm64/configs/vendor/moto-parrot-sm6450.config \
-              arch/arm64/configs/vendor/ext_config/debug-parrot-genevn.config \
-            --ending \
-              arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config \
-              arch/arm64/configs/nurfs-linux.fragment \
+            arch/arm64/configs/ksu-nh.defconfig \
+            arch/arm64/configs/consolidate.fragment \
+            arch/arm64/configs/defconfig.fragment \
+            arch/arm64/configs/vendor/moto-parrot-sm6450.config \
+            arch/arm64/configs/vendor/ext_config/debug-parrot-genevn.config \
+            arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config \
+            arch/arm64/configs/nurfs-linux.fragment \
             -o out/.config
 
           # Initialize Kconfig symbols (yes '' answers n to new prompts on no-tty)
@@ -81,15 +79,13 @@ jobs:
 
           # Re-emit final cumulative .config after olddefconfig fills missing symbols
           python3 scripts/kconfig/merge_nuki.py \
-            --base arch/arm64/configs/ksu-nh.defconfig \
-            --middle \
-              arch/arm64/configs/consolidate.fragment \
-              arch/arm64/configs/defconfig.fragment \
-              arch/arm64/configs/vendor/moto-parrot-sm6450.config \
-              arch/arm64/configs/vendor/ext_config/debug-parrot-genevn.config \
-            --ending \
-              arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config \
-              arch/arm64/configs/nurfs-linux.fragment \
+            arch/arm64/configs/ksu-nh.defconfig \
+            arch/arm64/configs/consolidate.fragment \
+            arch/arm64/configs/defconfig.fragment \
+            arch/arm64/configs/vendor/moto-parrot-sm6450.config \
+            arch/arm64/configs/vendor/ext_config/debug-parrot-genevn.config \
+            arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config \
+            arch/arm64/configs/nurfs-linux.fragment \
             -o out/.config
 
           # LZ4 NEON deployment (kernel Colonel compression, from deploy_lz4.sh)
