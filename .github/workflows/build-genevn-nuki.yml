@@ -71,23 +71,6 @@ jobs:
             arch/arm64/configs/nurfs-linux.fragment \
             -o out/.config
 
-          # Initialize Kconfig symbols (yes '' answers n to new prompts on no-tty)
-          yes "" | make O=out ARCH=arm64 \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CC=clang HOSTCC=gcc LLVM=-12 LLVM_IAS=-12 \
-            olddefconfig 2>&1 | tail -5
-
-          # Re-emit final cumulative .config after olddefconfig fills missing symbols
-          python3 scripts/kconfig/merge_nuki.py \
-            arch/arm64/configs/ksu-nh.defconfig \
-            arch/arm64/configs/consolidate.fragment \
-            arch/arm64/configs/defconfig.fragment \
-            arch/arm64/configs/vendor/moto-parrot-sm6450.config \
-            arch/arm64/configs/vendor/ext_config/debug-parrot-genevn.config \
-            arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config \
-            arch/arm64/configs/nurfs-linux.fragment \
-            -o out/.config
-
           # LZ4 NEON deployment (kernel Colonel compression, from deploy_lz4.sh)
           [ -f deploy_lz4.sh ] && chmod +x deploy_lz4.sh && ./deploy_lz4.sh || echo "no deploy_lz4.sh"
 
@@ -121,8 +104,8 @@ jobs:
           export STRIP=llvm-strip
           export CLANG_TRIPLE=aarch64-linux-gnu-
 
-          # yes '' answers 'n' (default) to all NEW Kconfig prompts on no-tty
-          yes "" | make O=out ARCH=arm64 \
+          # Pure compile: .config already complete from merge_nuki.py - no Kconfig prompts
+          make O=out ARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CC=clang LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- \
             LLVM=-12 LLVM_IAS=-12 \
