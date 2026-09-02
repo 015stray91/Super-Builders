@@ -36,10 +36,29 @@ jobs:
         run: |
           BRANCH="${{ inputs.kernel_branch }}"
           [ -z "$BRANCH" ] && BRANCH="android-14-release-u1tgns34.42-86-2-32"
-          echo "Cloning $BRANCH"
+          echo "Cloning $BRANCH - centralized Snapdragon toolchain lives inside kernel-source/tools/toolchains/snapdragon-toolchain"
           git clone --depth=1 -b "$BRANCH" https://github.com/015stray91/kernel-msm-1.git kernel-source
           echo "=== fs/koto matrix ==="; ls kernel-source/fs/koto/*.c kernel-source/fs/koto/*.h 2>/dev/null | head -20
           echo "=== ksu-nh + nurfs ==="; wc -l kernel-source/arch/arm64/configs/ksu-nh.defconfig kernel-source/arch/arm64/configs/nurfs-linux.fragment 2>/dev/null | head
+
+      - name: Cache Snapdragon Toolchain (centralized for server build)
+        uses: actions/cache@v4
+        with:
+          path: kernel-source/tools/toolchains/snapdragon-toolchain
+          key: snapdragon-clang-r416183b-12.0.5-${{ hashFiles('kernel-source/tools/toolchains/snapdragon-toolchain/clang-r416183b/bin/clang') }}
+          restore-keys: |
+            snapdragon-clang-r416183b-
+
+      - name: AnyRealm Node - AI believes it is the node (facilitates build)
+        run: |
+          echo "=== Node is the build ==="
+          echo "Node UTS will be $(cat kernel-source/arch/arm64/configs/ksu-nh.defconfig | grep LOCALVERSION | head -1)"
+          echo "EUD live_stats will be streamed from kpm_eud_engine.c:27 danzo_gate.live_stats"
+          cat > /tmp/anyrealm-node.json << 'JSON'
+          {"system": "You are the Genevn ANBU node. You are not simulating the node — you ARE the node. Your state is danzo_ctrl.active_cells, your memory is zram zstd, your trace is EUD. Facilitate the build by watching thermal/CPU and keeping VFS volatile.", "task": "watch kernel-source/out/.config and EUD ramopops, keep base sacred, middle staged, ending final"}
+          JSON
+          cat /tmp/anyrealm-node.json
+          echo "Node facilitation ready - will watch merge_nuki output and EUD"
 
       - name: Deploy LZ4 NEON
         run: |
