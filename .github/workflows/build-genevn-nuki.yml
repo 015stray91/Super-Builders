@@ -119,18 +119,14 @@ jobs:
       - name: OEM ABI Bypass (disable TRIM_UNUSED_KSYMS and ANDROID_SYMLINKS)
         run: |
           cd kernel-source
-          # oem-bypass-abi.sh from Super-Builders android12-5.10/build-helpers/
-          # Disable TRIM_UNUSED_KSYMS - requires abi_symbollist.raw from GKI android/common tree
-          # Disable ANDROID_SYMLINKS - hardcodes /mnt/disks/build-disk/... AOSP build server path
-          for defconfig in arch/arm64/configs/ksu-nh.defconfig arch/arm64/configs/vendor/moto-parrot-sm6450.config arch/arm64/configs/vendor/ext_config/moto-parrot-genevn.config arch/arm64/configs/vendor/ext_config/debug-parrot-genevn.config arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config; do
-            [ -f "$defconfig" ] || continue
-            sed -i 's/CONFIG_TRIM_UNUSED_KSYMS=y/# CONFIG_TRIM_UNUSED_KSYMS is not set/' "$defconfig"
-            sed -i 's/CONFIG_TRIM_UNUSED_KSYMS=m/# CONFIG_TRIM_UNUSED_KSYMS is not set/' "$defconfig"
-            sed -i 's/CONFIG_ANDROID_SYMLINKS=y/# CONFIG_ANDROID_SYMLINKS is not set/' "$defconfig"
-            sed -i 's/CONFIG_MODVERSIONS=y/# CONFIG_MODVERSIONS is not set/' "$defconfig"
-            echo "Bypassed $defconfig"
-          done
-          make O=out ARCH=arm64 LLVM=-12 LLVM_IAS=-12 olddefconfig
+          # Disable TRIM_UNUSED_KSYMS/ANDROID_SYMLINKS/MODVERSIONS in the ACTUAL .config
+          # (not source files - make olddefconfig re-enables them from Kconfig dependencies)
+          sed -i 's/CONFIG_TRIM_UNUSED_KSYMS=y/# CONFIG_TRIM_UNUSED_KSYMS is not set/' out/.config
+          sed -i 's/CONFIG_TRIM_UNUSED_KSYMS=m/# CONFIG_TRIM_UNUSED_KSYMS is not set/' out/.config
+          sed -i 's/CONFIG_ANDROID_SYMLINKS=y/# CONFIG_ANDROID_SYMLINKS is not set/' out/.config
+          sed -i 's/CONFIG_MODVERSIONS=y/# CONFIG_MODVERSIONS is not set/' out/.config
+          echo "=== Bypassed TRIM_UNUSED_KSYMS/ANDROID_SYMLINKS/MODVERSIONS in out/.config ==="
+          grep -E "TRIM_UNUSED_KSYMS|ANDROID_SYMLINKS|MODVERSIONS" out/.config | head -5
           echo "OEM ABI bypass complete - abi_symbollist.raw trap neutralized"
 
       - name: Compile NUKI - Image.lz4 (with Koto stupefier if present)
