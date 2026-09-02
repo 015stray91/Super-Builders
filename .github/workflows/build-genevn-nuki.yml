@@ -1,8 +1,8 @@
 name: AnyRealm NUKI - Moto G Stylus 5G 2023 (SM6450 parrot)
 
 # NUKI = Native Unified Kernel Image | NURFS = Native Unified RootFS
-# Decoupled from upstream: pulls toolchain from 015stray91/android-kernel-tools
-# (the full compiler-node repo) instead of a broken submodule.
+# Uses 015stray91/android-kernel-tools build-kernel.sh which runs the
+# bootstrap scripts and sets up the full compiler node correctly.
 
 on:
   push:
@@ -27,57 +27,55 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y bc bison flex libssl-dev libelf-dev cpio kmod python3 \
             lz4 liblz4-tool libncurses-dev rsync zip curl wget make device-tree-compiler \
-            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu lld-12 llvm-12
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu lld-12 llvm-12 git-lfs
           sudo ln -sf /usr/bin/ld.lld-12 /usr/local/bin/ld.lld
           sudo ln -sf /usr/bin/ld.lld-12 /usr/local/bin/ld64.lld
 
-      - name: Clone NUKI Source (kernel-msm-1) + pull toolchain from android-kernel-tools
+      - name: Clone NUKI Source + android-kernel-tools (compiler node)
         run: |
           BRANCH="${{ inputs.kernel_branch }}"
           [ -z "$BRANCH" ] && BRANCH="android-14-release-u1tgns34.42-86-2-32"
           echo "Cloning kernel source $BRANCH"
           git clone --depth=1 -b "$BRANCH" https://github.com/015stray91/kernel-msm-1.git kernel-source
-          # Drop the broken submodule dir (we'll install the toolchain fresh from android-kernel-tools)
           rm -rf kernel-source/tools/toolchains/snapdragon-toolchain
-          echo "Cloning toolchain from 015stray91/android-kernel-tools (the compiler-node repo)"
+          echo "Cloning android-kernel-tools (compiler node)"
           git clone --depth=1 https://github.com/015stray91/android-kernel-tools.git compiler-node
-          # Copy the AOSP clang-r416183b (LLVM 12) + GCC linaro 7.5 into kernel-source/tools/toolchains
-          mkdir -p kernel-source/tools/toolchains/snapdragon-toolchain
-          cp -r compiler-node/clang/host/linux-x86/clang-r416183b kernel-source/tools/toolchains/snapdragon-toolchain/
-          cp -r compiler-node/gcc/linux-x86/aarch64/gcc-linaro-7.5.0 kernel-source/tools/toolchains/snapdragon-toolchain/gcc/linux-x86/aarch64/
-          rm -rf compiler-node
-          echo "=== llvm-ar exists: ==="
-          ls -l kernel-source/tools/toolchains/snapdragon-toolchain/clang-r416183b/bin/llvm-ar
-          echo "=== aarch64-linux-gnu-gcc exists: ==="
-          ls -l kernel-source/tools/toolchains/snapdragon-toolchain/gcc/linux-x86/aarch64/gcc-linaro-7.5.0/bin/aarch64-linux-gnu-gcc
-          echo "=== Makefile HOSTCC trap: ==="
+          echo "=== Toolchain structure ==="
+          ls compiler-node/clang/host/linux-x86/ && ls compiler-node/gcc/linux-x86/aarch64/
+          echo "=== Makefile HOSTCC ==="
           grep -A2 "^HOSTCC" kernel-source/Makefile | head -4
 
-      - name: "Merge NUKI Config (A→Z cumulative)"
+      - name: Set up toolchain + kernel config (android-kernel-tools way)
         run: |
           cd kernel-source
+          # Install toolchain into kernel-source/tools/toolchains/snapdragon-toolchain
+          mkdir -p tools/toolchains/snapdragon-toolchain
+          mkdir -p tools/toolchains/snapdragon-toolchain/gcc/linux-x86/aarch64
+          cp -r ../compiler-node/clang/host/linux-x86/clang-r416183b tools/toolchains/snapdragon-toolchain/
+          cp -r ../compiler-node/gcc/linux-x86/aarch64/gcc-linaro-7.5.0 tools/toolchains/snapdragon-toolchain/gcc/linux-x86/aarch64/
+          rm -rf ../compiler-node
+          echo "=== llvm-ar: ==="; ls -l tools/toolchains/snapdragon-toolchain/clang-r416183b/bin/llvm-ar
+          echo "=== aarch64-gcc: ==="; ls -l tools/toolchains/snapdragon-toolchain/gcc/linux-x86/aarch64/gcc-linaro-7.5.0/bin/aarch64-linux-gnu-gcc
+          echo "=== 4 curated configs ==="
+          wc -l arch/arm64/configs/ksu-nh.defconfig \
+                 arch/arm64/configs/vendor/moto-parrot-sm6450.config \
+                 arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config \
+                 arch/arm64/configs/nurfs-linux.fragment
+
           mkdir -p out
-          # A→Z cumulative merge - 4 curated files, no GKI bloat
-          # base: ksu-nh.defconfig (GKI shit already removed)
-          # middle: vendor/moto-parrot-sm6450.config (Qualcomm SM6450)
-          # ending: vendor/ext_config/debug_moto_parrot_genevn.config (Moto G Stylus device)
-          #         + nurfs-linux.fragment (NURFS additions)
+          # A→Z cumulative merge: 4 curated files only
           python3 scripts/kconfig/merge_nuki.py \
             --base arch/arm64/configs/ksu-nh.defconfig \
             --middle arch/arm64/configs/vendor/moto-parrot-sm6450.config \
             --ending arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config arch/arm64/configs/nurfs-linux.fragment \
             -o out/.config
-          # alldefconfig fills Kconfig gaps with defaults
           make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang HOSTCC=gcc LLVM=-12 LLVM_IAS=-12 alldefconfig 2>&1 | tail -3
-          # Re-apply curated overrides
           python3 scripts/kconfig/merge_nuki.py \
             --base arch/arm64/configs/ksu-nh.defconfig \
             --middle arch/arm64/configs/vendor/moto-parrot-sm6450.config \
             --ending arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config arch/arm64/configs/nurfs-linux.fragment \
             -o out/.config
-          # silentoldconfig: no tty prompts, picks defaults for NEW entries
           make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang HOSTCC=gcc LLVM=-12 LLVM_IAS=-12 silentoldconfig 2>&1 | tail -3
-          # Re-apply curated overrides one final time
           python3 scripts/kconfig/merge_nuki.py \
             --base arch/arm64/configs/ksu-nh.defconfig \
             --middle arch/arm64/configs/vendor/moto-parrot-sm6450.config \
@@ -88,11 +86,9 @@ jobs:
             grep -q "^${f}=y" out/.config && echo " PASS $f" || echo " FAIL $f"
           done
 
-      - name: Compile NUKI (root Makefile has AnyRealm toolchain paths + HOSTCC=gcc)
+      - name: Compile NUKI
         run: |
           cd kernel-source
-          # Root Makefile uses $(CURDIR) for toolchain paths so O=out works
-          # Just run make - no env vars needed
           make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
             -j$(nproc --all) Image.lz4 modules 2>&1 | tee ../build.log
           ls -lh out/arch/arm64/boot/Image.lz4 || (echo "FAIL"; tail -100 ../build.log; exit 1)
