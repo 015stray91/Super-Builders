@@ -35,11 +35,11 @@ jobs:
         run: |
           BRANCH="${{ inputs.kernel_branch }}"
           [ -z "$BRANCH" ] && BRANCH="android-14-release-u1tgns34.42-86-2-32"
-          echo "Cloning $BRANCH - Snapdragon toolchain lives in kernel-source/tools/toolchains/snapdragon-toolchain"
           git clone --depth=1 -b "$BRANCH" https://github.com/015stray91/kernel-msm-1.git kernel-source
-          echo "=== AnyRealm build config ==="; head -5 kernel-source/build.config.anyrealm.kernel
           echo "=== Toolchain ==="; ls kernel-source/tools/toolchains/snapdragon-toolchain/clang-r416183b/bin/ | head -5
-          echo "=== Curated configs ==="; wc -l kernel-source/arch/arm64/configs/ksu-nh.defconfig kernel-source/arch/arm64/configs/nurfs-linux.fragment
+          echo "=== Curated configs ==="
+          wc -l kernel-source/arch/arm64/configs/ksu-nh.defconfig kernel-source/arch/arm64/configs/nurfs-linux.fragment
+          echo "=== Makefile HOSTCC ==="; grep -A2 "HOSTCC" kernel-source/Makefile | head -8
 
       - name: Cache Snapdragon Toolchain
         uses: actions/cache@v4
@@ -49,13 +49,34 @@ jobs:
           restore-keys: |
             snapdragon-clang-r416183b-
 
-      - name: Build NUKI (make from root uses AnyRealm paths in Makefile)
+      - name: "Merge NUKI Config (A→Z cumulative)"
         run: |
           cd kernel-source
-          # Root Makefile has AnyRealm toolchain paths embedded (Snapdragon clang + GCC).
-          # HOSTCC=gcc is hardcoded in Makefile (no LLVM=clang trap).
-          # Just run 'make Image.lz4 modules' from the root - no env vars needed.
           mkdir -p out
+          # A→Z cumulative merge - last layer wins for any conflict
+          python3 scripts/kconfig/merge_nuki.py \
+            --base arch/arm64/configs/defconfig arch/arm64/configs/ksu-nh.defconfig \
+            --middle arch/arm64/configs/consolidate.fragment arch/arm64/configs/defconfig.fragment arch/arm64/configs/vendor/moto-parrot-sm6450.config arch/arm64/configs/vendor/ext_config/debug-parrot-genevn.config \
+            --ending arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config arch/arm64/configs/nurfs-linux.fragment \
+            -o out/.config
+          # Fill Kconfig gaps with defaults so olddefconfig has no questions
+          yes "" | make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang LLVM=-12 LLVM_IAS=-12 alldefconfig 2>&1 | tail -3
+          # Re-apply curated overrides on top of alldefconfig defaults
+          python3 scripts/kconfig/merge_nuki.py \
+            --base arch/arm64/configs/defconfig arch/arm64/configs/ksu-nh.defconfig \
+            --middle arch/arm64/configs/consolidate.fragment arch/arm64/configs/defconfig.fragment arch/arm64/configs/vendor/moto-parrot-sm6450.config arch/arm64/configs/vendor/ext_config/debug-parrot-genevn.config \
+            --ending arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config arch/arm64/configs/nurfs-linux.fragment \
+            -o out/.config
+          echo "=== Final .config: $(grep -c '^CONFIG_' out/.config) CONFIGs ==="
+          for f in CONFIG_KSU CONFIG_KSU_SUSFS CONFIG_ZEROMOUNT CONFIG_OVERLAY_FS CONFIG_FUSE_FS CONFIG_ZRAM CONFIG_KALLSYMS CONFIG_MODULES CONFIG_ARM64; do
+            grep -q "^${f}=y" out/.config && echo " PASS $f" || echo " FAIL $f"
+          done
+
+      - name: Compile NUKI (root Makefile handles toolchain + HOSTCC=gcc)
+        run: |
+          cd kernel-source
+          # Root Makefile has AnyRealm toolchain paths embedded + HOSTCC=gcc hardcoded.
+          # Just run make; no env vars needed.
           yes "" | make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
             -j$(nproc --all) Image.lz4 modules 2>&1 | tee ../build.log
           ls -lh out/arch/arm64/boot/Image.lz4 || (echo "FAIL"; tail -100 ../build.log; exit 1)
