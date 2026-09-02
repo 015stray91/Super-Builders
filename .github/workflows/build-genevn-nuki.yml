@@ -61,15 +61,18 @@ jobs:
           done
           ls -la "$TOOLCHAIN_BIN/" | head -10
 
-      - name: Apply Build Helpers (bypass ABI, apply KSU seal patches)
+      - name: Apply Build Helpers (bypass ABI, fix compat, apply KSU seal patches)
         run: |
           cd kernel-source
-          # In CI, Super-Builders (which has KernelSU-Next/) is checked out at
-          # workspace root. kernel-source/ is a subdir clone. Path is:
-          #   ../android12-5.10/KernelSU-Next/
+          # In CI, Super-Builders is the workspace root. From kernel-source/,
+          # the paths are:
+          #   ../android12-5.10/KernelSU-Next/build-helpers/
+          #   ../android12-5.10/KernelSU-Next/patches/    (NOTE: 'patches', not 'Ksu-patches')
           HELPER="../android12-5.10/KernelSU-Next/build-helpers"
-          KSU_PATCHES="../android12-5.10/KernelSU-Next/Ksu-patches"
+          KSU_PATCHES="../android12-5.10/KernelSU-Next/patches"
+          SUBLEVEL=$(grep "^SUBLEVEL =" Makefile | head -1 | awk '{print $3}')
 
+          # 1) bypass-oem-abi: strips GKI protected_exports, disables TRIM in gki_defconfig
           if [ -f "$HELPER/bypass-oem-abi.sh" ]; then
             echo "=== bypass-oem-abi ==="
             bash "$HELPER/bypass-oem-abi.sh"
@@ -77,22 +80,42 @@ jobs:
             echo "bypass-oem-abi.sh not found at $HELPER - skipping"
           fi
 
+          # 2) bypass-abi-check: patches ABI check scripts for android12-5.10
           if [ -f "$HELPER/bypass-abi-check.sh" ]; then
             echo "=== bypass-abi-check (android12 5.10) ==="
             bash "$HELPER/bypass-abi-check.sh" . android12 5.10
           fi
 
-          # Apply the KSU seal patches (real source diffs from Super-Builders).
-          # These add fs/susfs.c, fs/zeromount.c, modify ksu Kbuild, etc.
+          # 3) fix-old-kernel-compat: pre-patch vanilla kernel fixes (sublevel-aware)
+          if [ -f "$HELPER/fix-old-kernel-compat.sh" ]; then
+            echo "=== fix-old-kernel-compat (sublevel=$SUBLEVEL) ==="
+            bash "$HELPER/fix-old-kernel-compat.sh" . "$SUBLEVEL"
+          fi
+
+          # 4) Apply KSU seal patches (real source diffs from Super-Builders)
+          #    These add fs/susfs.c, fs/zeromount.c, modify ksu Kbuild, etc.
           if [ -d "$KSU_PATCHES" ]; then
-            echo "=== Apply Ksu-patches (KSU seal) ==="
+            echo "=== Apply patches (KSU seal) ==="
             for patch in "$KSU_PATCHES"/*.patch; do
               [ -f "$patch" ] || continue
               echo "  -> $(basename $patch)"
               patch -p1 -F3 --forward < "$patch" || echo "  ! $(basename $patch) already applied or failed"
             done
           else
-            echo "Ksu-patches not found at $KSU_PATCHES - skipping"
+            echo "patches not found at $KSU_PATCHES - skipping"
+          fi
+
+          # 5) fix-susfs-compat: post-patch runtime compatibility fixes
+          #    (show_pad label, inotify_mark_user_mask, i_uid_into_mnt, etc.)
+          if [ -f "$HELPER/fix-susfs-compat.sh" ]; then
+            echo "=== fix-susfs-compat (sublevel=$SUBLEVEL) ==="
+            bash "$HELPER/fix-susfs-compat.sh" . "$SUBLEVEL" android12 5.10
+          fi
+
+          # 6) setup-bbg: BBG (BusyBox Garden) NetHunter userspace setup
+          if [ -f "$HELPER/setup-bbg.sh" ]; then
+            echo "=== setup-bbg ==="
+            bash "$HELPER/setup-bbg.sh" || echo "  setup-bbg returned non-zero (continuing)"
           fi
 
       - name: NUKI Colonel staged merge (8-file A->Z chain, base sacred, ending final)
