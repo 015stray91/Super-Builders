@@ -109,7 +109,7 @@ jobs:
           mkdir -p out
           python3 scripts/kconfig/merge_nuki.py \
             --base arch/arm64/configs/ksu-nh.defconfig \
-            --middle arch/arm64/configs/consolidate.fragment arch/arm64/configs/defconfig.fragment arch/arm64/configs/vendor/moto-parrot-sm6450.config arch/arm64/configs/vendor/ext_config/debug-parrot-genevn.config \
+            --middle arch/arm64/configs/vendor/moto-parrot-sm6450.config arch/arm64/configs/vendor/ext_config/moto-parrot-genevn.config arch/arm64/configs/vendor/ext_config/debug-parrot-genevn.config \
             --ending arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config arch/arm64/configs/nurfs-linux.fragment \
             -o out/.config || cp arch/arm64/configs/ksu-nh.defconfig out/.config
           make O=out ARCH=arm64 LLVM=-12 LLVM_IAS=-12 olddefconfig
