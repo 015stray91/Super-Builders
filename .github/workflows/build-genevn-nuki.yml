@@ -54,21 +54,23 @@ jobs:
           cd kernel-source
           mkdir -p out
           # A→Z cumulative merge - last layer wins for any conflict
+          # NO defconfig (GKI 6749-line bloated base) - use ksu-nh.defconfig instead
+          # NO debug-parrot-genevn.config (181KB debug monster) - use debug_moto_parrot_genevn.config (14 lines)
           python3 scripts/kconfig/merge_nuki.py \
-            --base arch/arm64/configs/defconfig arch/arm64/configs/ksu-nh.defconfig \
-            --middle arch/arm64/configs/consolidate.fragment arch/arm64/configs/defconfig.fragment arch/arm64/configs/vendor/moto-parrot-sm6450.config arch/arm64/configs/vendor/ext_config/debug-parrot-genevn.config \
+            --base arch/arm64/configs/ksu-nh.defconfig \
+            --middle arch/arm64/configs/vendor/moto-parrot-sm6450.config \
             --ending arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config arch/arm64/configs/nurfs-linux.fragment \
             -o out/.config
           # Fill Kconfig gaps with defaults so olddefconfig has no questions
           yes "" | make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang LLVM=-12 LLVM_IAS=-12 alldefconfig 2>&1 | tail -3
           # Re-apply curated overrides on top of alldefconfig defaults
           python3 scripts/kconfig/merge_nuki.py \
-            --base arch/arm64/configs/defconfig arch/arm64/configs/ksu-nh.defconfig \
-            --middle arch/arm64/configs/consolidate.fragment arch/arm64/configs/defconfig.fragment arch/arm64/configs/vendor/moto-parrot-sm6450.config arch/arm64/configs/vendor/ext_config/debug-parrot-genevn.config \
+            --base arch/arm64/configs/ksu-nh.defconfig \
+            --middle arch/arm64/configs/vendor/moto-parrot-sm6450.config \
             --ending arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config arch/arm64/configs/nurfs-linux.fragment \
             -o out/.config
           echo "=== Final .config: $(grep -c '^CONFIG_' out/.config) CONFIGs ==="
-          for f in CONFIG_KSU CONFIG_KSU_SUSFS CONFIG_ZEROMOUNT CONFIG_OVERLAY_FS CONFIG_FUSE_FS CONFIG_ZRAM CONFIG_KALLSYMS CONFIG_MODULES CONFIG_ARM64; do
+          for f in CONFIG_KSU CONFIG_KSU_SUSFS CONFIG_ZEROMOUNT CONFIG_OVERLAY_FS CONFIG_FUSE_FS CONFIG_ZRAM CONFIG_KALLSYMS CONFIG_MODULES CONFIG_ARM64 CONFIG_QCOM_EUD CONFIG_KPM; do
             grep -q "^${f}=y" out/.config && echo " PASS $f" || echo " FAIL $f"
           done
 
