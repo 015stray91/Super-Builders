@@ -48,6 +48,7 @@ jobs:
           echo "debug_config=$(echo "$PROFILE" | jq -r .debug_config)" >> $GITHUB_OUTPUT
           echo "nurfs_fragment=$(echo "$PROFILE" | jq -r .nurfs_fragment)" >> $GITHUB_OUTPUT
           echo "nethunter_patches=$(echo "$PROFILE" | jq -r .nethunter_patches)" >> $GITHUB_OUTPUT
+          echo "anykernel=$(echo "$PROFILE" | jq -r .anykernel)" >> $GITHUB_OUTPUT
           echo "add_susfs=$(echo "$PROFILE" | jq -r .add_susfs)" >> $GITHUB_OUTPUT
           echo "add_zeromount=$(echo "$PROFILE" | jq -r .add_zeromount)" >> $GITHUB_OUTPUT
           echo "add_zram=$(echo "$PROFILE" | jq -r .add_zram)" >> $GITHUB_OUTPUT
@@ -193,6 +194,27 @@ jobs:
           mkdir -p ../modules
           find out -name "*.ko" -exec cp {} ../modules/ \;
 
+      - name: Package Flashable ZIP
+        run: |
+          AK_URL="${{ steps.profile.outputs.anykernel }}"
+          if [ -n "$AK_URL" ] && [ "$AK_URL" != "null" ]; then
+            echo "=== Cloning custom AnyKernel: $AK_URL ==="
+            git clone --depth=1 "$AK_URL" anykernel
+            echo "=== Copying Image.lz4 into AnyKernel ==="
+            cp kernel-source/out/arch/arm64/boot/Image.lz4 anykernel/
+            if [ -f kernel-source/out/arch/arm64/boot/dts/qcom/*.dtb ]; then
+              mkdir -p anykernel/dtb
+              cp kernel-source/out/arch/arm64/boot/dts/qcom/*.dtb anykernel/dtb/
+            fi
+            echo "=== Building flashable zip ==="
+            cd anykernel
+            zip -r9 ../AnyRealm-NUKI-${{ inputs.device_codename }}.zip * -x "*.git*"
+            cd ..
+            ls -lh AnyRealm-NUKI-${{ inputs.device_codename }}.zip
+          else
+            echo "No custom AnyKernel URL in profile, skipping zip packaging"
+          fi
+
       - name: Upload NUKI
         uses: actions/upload-artifact@v4
         if: always()
@@ -204,5 +226,6 @@ jobs:
             build.log
             kernel-source/out/.config
             modules/
+            AnyRealm-NUKI-${{ inputs.device_codename }}.zip
           compression-level: 9
           overwrite: true

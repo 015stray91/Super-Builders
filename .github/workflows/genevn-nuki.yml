@@ -1,8 +1,5 @@
 name: AnyRealm NUKI - Genevn SM6450
 
-# Thin dispatcher: download deps → build via build-ksu-next.yml
-# All device params come from device-profiles.json
-
 on:
   workflow_dispatch:
     inputs:
