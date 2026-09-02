@@ -21,7 +21,7 @@
       "add_zram": true,
       "add_overlayfs": true,
       "add_kpm": true,
-      "add_nethunter": false
+      "add_nethunter": true
     },
     "lake": {
       "name": "Xiaomi Redmi 14C",
