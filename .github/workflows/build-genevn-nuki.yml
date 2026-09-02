@@ -50,6 +50,16 @@ jobs:
           git clone --depth=1 -b "$BRANCH" https://github.com/015stray91/kernel-msm-1.git kernel-source
           echo "=== In-tree toolchain (Clang 12 inner compiler) ==="
           ls kernel-source/tools/toolchains/snapdragon-toolchain/
+          # Symlink missing llvm-* utilities from system llvm-12 into the in-tree toolchain
+          TOOLCHAIN_BIN=kernel-source/tools/toolchains/snapdragon-toolchain/clang-r416183b/bin
+          mkdir -p "$TOOLCHAIN_BIN"
+          for tool in llvm-ar llvm-nm llvm-objcopy llvm-objdump llvm-strip llvm-readelf; do
+            if [ ! -e "$TOOLCHAIN_BIN/$tool" ] && [ -e /usr/bin/$tool-12 ]; then
+              sudo ln -sf /usr/bin/$tool-12 "$TOOLCHAIN_BIN/$tool"
+              echo "  linked $tool -> /usr/bin/$tool-12"
+            fi
+          done
+          ls -la "$TOOLCHAIN_BIN/" | head -20
 
       - name: Assemble NUKI Colonel config (4-pillar A->Z chain)
         run: |
