@@ -19,6 +19,7 @@ on:
           - a14-6-1
           - a15-6-6
           - a16-6-12
+          - genevn
           - all
         default: "custom"
       ksu_variant:
@@ -61,12 +62,16 @@ on:
         type: string
         default: ""
       device_codename:
-        description: "Device profile (generic = no identity spoofing)"
+        description: "Device profile (codename from device-profiles.json)"
         type: choice
         options:
-          - generic
+          - genevn-g
           - lake
-        default: "lake"
+        default: "genevn-g"
+      kernel_branch:
+        description: "kernel-msm-1 branch (genevn only)"
+        type: string
+        default: "android-14-release-u1tgns34.42-86-2-32"
 
 jobs:
   build-a12-5-10:
@@ -188,3 +193,11 @@ jobs:
       add_kpm: ${{ inputs.add_kpm }}
       sukisu_commit: ${{ inputs.sukisu_commit }}
       device_codename: ${{ inputs.device_codename }}
+
+  build-genevn:
+    if: ${{ inputs.kernel_build_version == 'genevn' }}
+    uses: ./.github/workflows/genevn-nuki.yml
+    secrets: inherit
+    with:
+      device_codename: ${{ inputs.device_codename }}
+      kernel_branch: ${{ inputs.kernel_branch }}
