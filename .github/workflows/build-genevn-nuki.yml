@@ -297,10 +297,15 @@ jobs:
           export CONFIG_NTFS_FS=y
           export CONFIG_NTFS_RW=y
           export CONFIG_EXFAT_FS=y
-          # CIFS has cifs_listxattr conflict (cifsfs.h macro)
-          export CONFIG_CIFS=n
-          export CONFIG_CIFS_XATTR=n
-          export CONFIG_CIFS_SMBD=n
+           # INCFS has PAGE_SIZE mismatch (BUILD_BUG_ON PAGE_SIZE != 4096)
+           export CONFIG_INCREMENTAL_FS=n
+           # CIFS has cifs_listxattr conflict (cifsfs.h macro)
+           export CONFIG_CIFS=n
+           export CONFIG_CIFS_XATTR=n
+           export CONFIG_CIFS_SMBD=n
+           # FUTEX2 and ZCOMP_LZ4K not in base .config
+           export CONFIG_FUTEX2=n
+           export CONFIG_ZCOMP_LZ4K=n
           export CONFIG_NLS=y
           export CONFIG_NLS_CODEPAGE_437=y
           export CONFIG_NLS_ISO8859_1=y
