@@ -149,8 +149,11 @@ jobs:
             export CC=clang LLVM=-12 LLVM_IAS=-12
           fi
           export CROSS_COMPILE=aarch64-linux-gnu- LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CLANG_TRIPLE=aarch64-linux-gnu-
-          make -j$(nproc --all) O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$CC" LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CLANG_TRIPLE=aarch64-linux-gnu- LLVM=-12 LLVM_IAS=-12 Image.lz4 2>&1 | tee ../build.log
+          make -j$(nproc --all) O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$CC" LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CLANG_TRIPLE=aarch64-linux-gnu- LLVM=-12 LLVM_IAS=-12 Image.lz4 modules 2>&1 | tee ../build.log
           ls -lh out/arch/arm64/boot/Image.lz4 || (echo "FAIL"; tail -100 ../build.log; exit 1)
+          mkdir -p ../modules
+          find out -name "*.ko" -exec cp {} ../modules/ \;
+          ls -lh ../modules/*.ko 2>/dev/null | head -10 || echo "no .ko modules"
 
       - name: Upload NUKI
         uses: actions/upload-artifact@v4
@@ -162,5 +165,6 @@ jobs:
             kernel-source/out/arch/arm64/boot/Image
             kernel-source/build.log
             kernel-source/out/.config
+            modules/
           compression-level: 9
           overwrite: true
