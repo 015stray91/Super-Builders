@@ -61,6 +61,40 @@ jobs:
           done
           ls -la "$TOOLCHAIN_BIN/" | head -10
 
+      - name: Apply Build Helpers (bypass ABI, apply KSU seal patches)
+        run: |
+          cd kernel-source
+          # In CI, Super-Builders (which has KernelSU-Next/) is checked out at
+          # workspace root. kernel-source/ is a subdir clone. Path is:
+          #   ../android12-5.10/KernelSU-Next/
+          HELPER="../android12-5.10/KernelSU-Next/build-helpers"
+          KSU_PATCHES="../android12-5.10/KernelSU-Next/Ksu-patches"
+
+          if [ -f "$HELPER/bypass-oem-abi.sh" ]; then
+            echo "=== bypass-oem-abi ==="
+            bash "$HELPER/bypass-oem-abi.sh"
+          else
+            echo "bypass-oem-abi.sh not found at $HELPER - skipping"
+          fi
+
+          if [ -f "$HELPER/bypass-abi-check.sh" ]; then
+            echo "=== bypass-abi-check (android12 5.10) ==="
+            bash "$HELPER/bypass-abi-check.sh" . android12 5.10
+          fi
+
+          # Apply the KSU seal patches (real source diffs from Super-Builders).
+          # These add fs/susfs.c, fs/zeromount.c, modify ksu Kbuild, etc.
+          if [ -d "$KSU_PATCHES" ]; then
+            echo "=== Apply Ksu-patches (KSU seal) ==="
+            for patch in "$KSU_PATCHES"/*.patch; do
+              [ -f "$patch" ] || continue
+              echo "  -> $(basename $patch)"
+              patch -p1 -F3 --forward < "$patch" || echo "  ! $(basename $patch) already applied or failed"
+            done
+          else
+            echo "Ksu-patches not found at $KSU_PATCHES - skipping"
+          fi
+
       - name: NUKI Colonel staged merge (8-file A->Z chain, base sacred, ending final)
         run: |
           cd kernel-source
@@ -83,9 +117,10 @@ jobs:
           # Belt-and-suspenders: stub out the AOSP-internal GKI abi_symbollist.raw
           # path that debug-parrot-genevn references (path is from a different host).
           # NUKI Colonel is GKI 1.0; the GKI 2.0 trim path doesn't apply here.
+          # NOTE: TRIM_UNUSED_KSYMS stays =y (needed for ZeroMount VFS).
+          # The actual GKI symbol check is bypassed by bypass-abi-check.sh below.
           sed -i 's|CONFIG_UNUSED_KSYMS_WHITELIST=.*|CONFIG_UNUSED_KSYMS_WHITELIST=""|g' out/.config 2>/dev/null || true
-          sed -i 's|CONFIG_TRIM_UNUSED_KSYMS=y|# CONFIG_TRIM_UNUSED_KSYMS is not set|g' out/.config 2>/dev/null || true
-          grep "TRIM_UNUSED_KSYMS\|KSYMS_WHITELIST" out/.config || echo " TRIM/KSYMS_WHITELIST: cleared (good)"
+          grep "KSYMS_WHITELIST" out/.config || echo " UNUSED_KSYMS_WHITELIST: cleared"
 
           # LZ4 NEON deployment (kernel Colonel compression, from deploy_lz4.sh)
           [ -f deploy_lz4.sh ] && chmod +x deploy_lz4.sh && ./deploy_lz4.sh || echo "no deploy_lz4.sh"
