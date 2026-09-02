@@ -103,13 +103,18 @@ jobs:
           echo "=== llvm-ar ==="; ls tools/toolchains/snapdragon-toolchain/clang-r416183b/bin/llvm-ar
           echo "=== aarch64-gcc ==="; ls tools/toolchains/snapdragon-toolchain/gcc/linux-x86/aarch64/gcc-linaro-7.5.0/bin/aarch64-linux-gnu-gcc
 
-      - name: Apply NetHunter Patches
+      - name: Apply NetHunter Patches (real source patches, not config-only)
+        # NOTE: NH patches here = real .patch diffs from android12-5.10/KernelSU-Next/patches/
+        #       They modify kernel-source/ source (e.g. 50_add_susfs_in_gki-android12-5.10.patch
+        #       adds fs/susfs.c, 60_zeromount patches fs/ for ZeroMount).
+        #       Ksu-patches/*.patch inside kernel-msm-1 (the seal layer) are
+        #       DIFFERENT — those are config-only flag verifications.
         if: ${{ steps.profile.outputs.add_nethunter == 'true' }}
         run: |
           cd kernel-source
           NH_DIR="${{ steps.profile.outputs.nethunter_patches }}"
-          if [ -d "$NH_DIR" ]; then
-            echo "=== Applying NetHunter patches from $NH_DIR ==="
+          if [ -d "$NH_DIR" ] && [ "$(ls -A "$NH_DIR"/*.patch 2>/dev/null)" ]; then
+            echo "=== Applying NetHunter source patches from $NH_DIR ==="
             for patch in "$NH_DIR"/*.patch; do
               if [ -f "$patch" ]; then
                 echo "  -> $(basename $patch)"
@@ -118,9 +123,14 @@ jobs:
                   echo "  ! $(basename $patch) failed to apply cleanly, continuing"
               fi
             done
+            echo "=== Source patches applied. Verifying CONFIG_* flags survived ==="
+            for f in CONFIG_KSU CONFIG_KSU_SUSFS CONFIG_ZEROMOUNT CONFIG_OVERLAY_FS \
+                     CONFIG_FUSE_FS CONFIG_ZRAM CONFIG_KALLSYMS CONFIG_MODULES; do
+              grep -q "^${f}=y" out/.config && echo " PASS $f" || echo " FAIL $f"
+            done
           else
-            echo "WARNING: NetHunter patches dir $NH_DIR not found in repo"
-            echo "NetHunter patches are NOT being applied"
+            echo "NH source patches dir empty/missing — relying on in-tree ksu-nh.defconfig flags"
+            echo "(KernelSU-Next is in tree natively, SUSFS/ZeroMount sources already in fs/)"
           fi
 
       - name: Validate Curated Configs

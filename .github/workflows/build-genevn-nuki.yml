@@ -6,9 +6,9 @@ name: AnyRealm NUKI Colonel - Moto G Stylus 5G 2023 (SM6450 parrot)
 # No GKI 2.0 build.config.* fragments. No olddefconfig. No alldefconfig.
 #
 # Build layers (in order):
-#   1. Logic    = CONFIG_* flags (9-file DEFCONFIG chain via merge_nuki.py)
+#   1. Logic    = CONFIG_* flags (4-pillar DEFCONFIG chain via merge_nuki.py)
 #   2. Movement = .c/.h source files (fs/koto/, susfs.c, zeromount.c, etc.)
-#   3. Seal     = KernelSU-Next Ksu-patches/*.patch (applied before compile)
+#   3. Seal     = KernelSU-Next (in-tree, native; no clone needed)
 #
 # Toolchain:
 #   Inner  = Clang 12.0.5  (tools/toolchains/snapdragon-toolchain/clang-r416183b/)
@@ -51,51 +51,19 @@ jobs:
           echo "=== In-tree toolchain (Clang 12 inner compiler) ==="
           ls kernel-source/tools/toolchains/snapdragon-toolchain/
 
-      - name: Clone KernelSU-Next (seal + build helpers, no submodule)
-        run: |
-          cd kernel-source
-          # Clone Ksu-patches (the Colonel seal layer)
-          git clone --depth=1 \
-            https://github.com/015stray91/kernel-msm-1.git \
-            --filter=blob:none \
-            --sparse \
-            KernelSU-Next-tmp
-          cd KernelSU-Next-tmp
-          git sparse-checkout set KernelSU-Next/Ksu-patches KernelSU-Next/build-helpers
-          rm -rf ../KernelSU-Next
-          mv KernelSU-Next ..
-          cd .. && rm -rf KernelSU-Next-tmp
-          echo "=== Ksu-patches (seal) ==="
-          ls KernelSU-Next/Ksu-patches/
-          echo "=== build-helpers ==="
-          ls KernelSU-Next/build-helpers/
-
-      - name: Apply NUKI Colonel Seal (Ksu-patches/*.patch)
-        run: |
-          cd kernel-source
-          # Apply KernelSU-Next seal patches in order
-          # (10_susfs -> 50_susfs -> 51_enhanced -> 60_zeromount -> 65_adb_filter -> 70_ksu_safety)
-          for patch in KernelSU-Next/Ksu-patches/*.patch; do
-            [ -f "$patch" ] || continue
-            echo "Applying: $(basename $patch)"
-            patch -p1 -F3 --forward < "$patch" || true
-          done
-          echo "Seal applied."
-
-      - name: Assemble NUKI Colonel config (9-file A->Z chain)
+      - name: Assemble NUKI Colonel config (4-pillar A->Z chain)
         run: |
           cd kernel-source
           mkdir -p out
 
-          # 9-file DEFCONFIG chain from build.config.anyrealm.kernel DEFCONFIG_FRAGMENTS:
-          #   ksu-nh.defconfig (base) + consolidate + defconfig + moto-parrot-sm6450
-          #   + debug-parrot-genevn + debug_moto_parrot_genevn + nurfs-linux (ending)
+          # 4 curated non-overlapping pillars (koto-MB merge_nuki.py):
+          #   base    = ksu-nh.defconfig (KSU + NH flags, sacred)
+          #   middle  = vendor/moto-parrot-sm6450.config (QCOM/SM6450)
+          #            + vendor/ext_config/debug_moto_parrot_genevn.config (device)
+          #   ending  = nurfs-linux.fragment (NURFS Linux additions)
           python3 scripts/kconfig/merge_nuki.py \
             arch/arm64/configs/ksu-nh.defconfig \
-            arch/arm64/configs/consolidate.fragment \
-            arch/arm64/configs/defconfig.fragment \
             arch/arm64/configs/vendor/moto-parrot-sm6450.config \
-            arch/arm64/configs/vendor/ext_config/debug-parrot-genevn.config \
             arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config \
             arch/arm64/configs/nurfs-linux.fragment \
             -o out/.config
