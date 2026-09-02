@@ -53,8 +53,11 @@ jobs:
           # Belt-and-suspenders: stub out the AOSP-internal GKI 2.0 abi_symbollist.raw
           # path that defconfig / debug-parrot-genevn.config reference. NUKI Colonel
           # is GKI 1.0 and doesn't need it (ksu-nh.defconfig disables TRIM_UNUSED_KSYMS).
-          mkdir -p /mnt/disks/build-disk/src/android/common-android12-5.10-2025-02/out/android12-5.10/common
-          : > /mnt/disks/build-disk/src/android/common-android12-5.10-2025-02/out/android12-5.10/common/abi_symbollist.raw
+          mkdir -p out
+          # Clear any hardcoded GKI abi_whitelist path in the merged .config
+          sed -i 's|CONFIG_UNUSED_KSYMS_WHITELIST=.*|CONFIG_UNUSED_KSYMS_WHITELIST=""|g' out/.config 2>/dev/null || true
+          sed -i 's|CONFIG_UNUSED_KSYMS_WHITELIST=.*|CONFIG_UNUSED_KSYMS_WHITELIST=|g' out/.config 2>/dev/null || true
+          grep "KSYMS_WHITELIST" out/.config || echo " UNUSED_KSYMS_WHITELIST: not set (good)"
 
           # Mirror build.config.anyrealm.kernel DEFCONFIG chain (lines 55-64)
           # merge_nuki.py uses positional fallback when no --flags: first=base, last 2=ending, rest=middle
