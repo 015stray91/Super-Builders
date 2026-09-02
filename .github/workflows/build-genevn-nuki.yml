@@ -30,7 +30,16 @@ jobs:
       - name: Install Dependencies (jammy - clang12 safe)
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison flex libssl-dev libelf-dev cpio kmod python3 lz4 liblz4-tool libncurses-dev rsync zip curl wget gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu device-tree-compiler
+          sudo apt-get install -y bc bison flex libssl-dev libelf-dev cpio kmod python3 lz4 liblz4-tool libncurses-dev rsync zip curl wget gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu device-tree-compiler lld-12 llvm-12
+          # Pre-stage snapdragon ld.lld so Kconfig olddefconfig can find it (Makefile uses 'ld.lld' for syncconfig host linking)
+          mkdir -p $HOME/bin
+          for t in ld.lld ld64.lld llvm-ar llvm-nm llvm-objcopy llvm-objdump llvm-strip; do
+            if [ -x kernel-source/tools/toolchains/snapdragon-toolchain/clang-r416183b/bin/$t ]; then
+              ln -sf $PWD/kernel-source/tools/toolchains/snapdragon-toolchain/clang-r416183b/bin/$t $HOME/bin/$t
+            fi
+          done
+          ls -la $HOME/bin/ | head -20
+          $HOME/bin/ld.lld --version 2>&1 | head -1 || echo "ld.lld pre-stage failed"
 
       - name: Clone Updated NUKI Source (015stray91/kernel-msm-1)
         run: |
@@ -97,6 +106,8 @@ jobs:
 
       - name: Merge NUKI Config (ksu-nh deduped + NURFS)
         run: |
+          # Must PATH the snapdragon toolchain before olddefconfig so Makefile finds ld.lld for Kconfig host linking (syncconfig step)
+          export PATH="$HOME/bin:$PWD/kernel-source/tools/toolchains/snapdragon-toolchain/clang-r416183b/bin:$PWD/kernel-source/tools/toolchains/snapdragon-toolchain/gcc/linux-x86/aarch64/gcc-linaro-7.5.0/bin:$PATH"
           cd kernel-source
           mkdir -p out
           python3 scripts/kconfig/merge_nuki.py \
