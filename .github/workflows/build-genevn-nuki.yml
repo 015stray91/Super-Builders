@@ -49,16 +49,45 @@ jobs:
           restore-keys: |
             snapdragon-clang-r416183b-
 
+      - name: Clone Full Compiler Node (all clangs blended + Koto LLVM-17 obfuscator - the stupefier)
+        run: |
+          echo "=== Full compiler-node: all clang versions + Kotoamatsukami LLVM-17 obfuscator ==="
+          mkdir -p $HOME/compiler-node/fetched $HOME/compiler-node/kits/llvm-full
+          if [ ! -d "$HOME/compiler-node/fetched/Kotoamatsukami" ]; then
+            git clone --depth=1 -b llvm-17-plugins https://github.com/015stray91/Kotoamatsukami.git $HOME/compiler-node/fetched/Kotoamatsukami || echo "Koto clone failed, will use in-tree"
+          fi
+          if [ ! -x "$HOME/compiler-node/kits/llvm-full/llvm-17.0.6/bin/clang-17" ]; then
+            git clone --depth=1 https://github.com/yasuo-ozu/llvm-full.git $HOME/compiler-node/fetched/llvm-full 2>/dev/null || true
+            $HOME/compiler-node/fetched/llvm-full/install-llvm.sh 17 $HOME/compiler-node/kits/llvm-full/llvm-17.0.6 2>&1 | tail -5 || echo "llvm-17 fetch via install-llvm.sh"
+          fi
+          ls $HOME/compiler-node/kits/llvm-full/llvm-17.0.6/bin/clang* 2>/dev/null | head -5 || echo "llvm-17 not yet cached, will fallback to in-tree clang-r416183b"
+          ls $HOME/compiler-node/fetched/Kotoamatsukami/compiler/clang_wrapper.sh 2>/dev/null && echo "Koto wrapper ready: $HOME/compiler-node/fetched/Kotoamatsukami/compiler/clang_wrapper.sh" || echo "Koto not ready, using plain clang"
+          # Make it accessible for next steps
+          echo "COMPILER_NODE=$HOME/compiler-node" >> $GITHUB_ENV
+          echo "KOTO_WRAPPER=$HOME/compiler-node/fetched/Kotoamatsukami/compiler/clang_wrapper.sh" >> $GITHUB_ENV
+
       - name: AnyRealm Node - AI believes it is the node (facilitates build)
         run: |
-          echo "=== Node is the build ==="
+          echo "=== Node IS the build - training to become ==="
           echo "Node UTS will be $(cat kernel-source/arch/arm64/configs/ksu-nh.defconfig | grep LOCALVERSION | head -1)"
-          echo "EUD live_stats will be streamed from kpm_eud_engine.c:27 danzo_gate.live_stats"
+          echo "EUD live_stats from kpm_eud_engine.c:27 danzo_gate.live_stats"
           cat > /tmp/anyrealm-node.json << 'JSON'
           {"system": "You are the Genevn ANBU node. You are not simulating the node — you ARE the node. Your state is danzo_ctrl.active_cells, your memory is zram zstd, your trace is EUD. Facilitate the build by watching thermal/CPU and keeping VFS volatile.", "task": "watch kernel-source/out/.config and EUD ramopops, keep base sacred, middle staged, ending final"}
           JSON
           cat /tmp/anyrealm-node.json
-          echo "Node facilitation ready - will watch merge_nuki output and EUD"
+          # Train local tiny model to *become* the node (Ollama Modelfile) - if ollama not on runner, just log the training data
+          if command -v ollama >/dev/null 2>&1; then
+            cat > /tmp/Modelfile.anyrealm-node << 'MF'
+          FROM qwen2.5-coder
+          SYSTEM "You are the Genevn ANBU node. You ARE the node, not a simulation. Your state is danzo_ctrl.active_cells, your memory is zram, your trace is EUD. You facilitate the 6*6*6 Sage builds and keep VFS volatile."
+          PARAMETER temperature 0.2
+          MF
+            ollama create anyrealm-node -f /tmp/Modelfile.anyrealm-node 2>&1 | head -5 || true
+            echo "AnyRealm node model created - it now believes it is the node"
+          else
+            echo "Ollama not on runner - node facilitation is JSON + EUD trace for now (train locally via ~/compiler-node with ollama create anyrealm-node)"
+          fi
+          echo "Node facilitation ready - watches merge_nuki and EUD for complete stabilization"
 
       - name: Deploy LZ4 NEON
         run: |
@@ -79,13 +108,23 @@ jobs:
           for f in CONFIG_KSU CONFIG_KSU_SUSFS CONFIG_ZEROMOUNT CONFIG_OVERLAY_FS CONFIG_FUSE_FS CONFIG_TMPFS_XATTR CONFIG_USER_NS CONFIG_IPC_NS CONFIG_CGROUP_DEVICE CONFIG_FHANDLE CONFIG_SQUASHFS CONFIG_ANDROID_BINDER_IPC CONFIG_ASHMEM CONFIG_ZRAM; do grep -q "^${f}=y" out/.config && echo " PASS $f" || echo " FAIL $f"; done
           grep default_compressor drivers/block/zram/zram_drv.c | head -1
 
-      - name: Compile NUKI - Image.gz
+      - name: Compile NUKI - Image.gz (with Koto stupefier if present)
         run: |
           cd kernel-source
           export ARCH=arm64; export SUBARCH=arm64
-          export PATH="$PWD/tools/toolchains/snapdragon-toolchain/clang-r416183b/bin:$PWD/tools/toolchains/snapdragon-toolchain/gcc/linux-x86/aarch64/gcc-linaro-7.5.0/bin:$PATH"
-          export CROSS_COMPILE=aarch64-linux-gnu-; export CC=clang; export LD=ld.lld; export AR=llvm-ar; export NM=llvm-nm; export OBJCOPY=llvm-objcopy; export OBJDUMP=llvm-objdump; export STRIP=llvm-strip; export LLVM=1; export LLVM_IAS=1; export CLANG_TRIPLE=aarch64-linux-gnu-
-          make -j$(nproc --all) O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 Image.gz 2>&1 | tee ../build.log
+          # Use full compiler-node if Koto wrapper is present (the stupefier from llvm-17-plugins), else fallback to in-tree snapdragon
+          if [ -x "$KOTO_WRAPPER" ] && [ -x "$HOME/compiler-node/kits/llvm-full/llvm-17.0.6/bin/clang-17" ]; then
+            echo "Using Kotoamatsukami LLVM-17 obfuscator (stupefier) via $KOTO_WRAPPER"
+            export PATH="$HOME/compiler-node/kits/llvm-full/llvm-17.0.6/bin:$PWD/tools/toolchains/snapdragon-toolchain/gcc/linux-x86/aarch64/gcc-linaro-7.5.0/bin:$PATH"
+            export CC="$KOTO_WRAPPER"
+            export KOTO_PASSES="--obfuscator --flatten --bcf"  # tune as needed
+          else
+            echo "Using in-tree snapdragon clang-r416183b (Koto not cached, using plain)"
+            export PATH="$PWD/tools/toolchains/snapdragon-toolchain/clang-r416183b/bin:$PWD/tools/toolchains/snapdragon-toolchain/gcc/linux-x86/aarch64/gcc-linaro-7.5.0/bin:$PATH"
+            export CC=clang
+          fi
+          export CROSS_COMPILE=aarch64-linux-gnu-; export LD=ld.lld; export AR=llvm-ar; export NM=llvm-nm; export OBJCOPY=llvm-objcopy; export OBJDUMP=llvm-objdump; export STRIP=llvm-strip; export LLVM=1; export LLVM_IAS=1; export CLANG_TRIPLE=aarch64-linux-gnu-
+          make -j$(nproc --all) O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$CC" LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 Image.gz 2>&1 | tee ../build.log
           ls -lh out/arch/arm64/boot/Image.gz || (echo "FAIL"; tail -100 ../build.log; exit 1)
 
       - name: Upload NUKI
