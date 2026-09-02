@@ -108,6 +108,127 @@ jobs:
           export CLANG_TRIPLE=aarch64-linux-gnu-
 
           # Pure compile: .config already complete from merge_nuki.py - no Kconfig prompts
+          # Also export all Colonel sacred CONFIG_* from build.config.anyrealm.kernel
+          # (Parts 1-12) so kernel Makefile sees them as env vars (override .config).
+          set -a
+          # Part 1: Colonel compression & performance
+          export CONFIG_KERNEL_LZ4=y
+          export CONFIG_ZRAM=y
+          export CONFIG_ZSMALLOC=y
+          export CONFIG_ZCOMP_LZ4K=y
+          export CONFIG_CPU_FREQ_GOV_PERFORMANCE=y
+          export CONFIG_QCOM_EUD=y
+          # Part 2: KernelSU + SUSFS (sacred Colonel flags)
+          export CONFIG_KPROBES=y
+          export CONFIG_KPROBE_EVENTS=y
+          export CONFIG_KSU=y
+          export CONFIG_KSU_SUSFS=y
+          export CONFIG_KSU_SUSFS_HAS_MEM_PAGES=y
+          export CONFIG_KSU_SUSFS_SUS_MOUNT=y
+          export CONFIG_KSU_SUSFS_ZERO_MOUNT=y
+          export CONFIG_KSU_SUSFS_SPOOF_KSTAT=y
+          export CONFIG_KSU_SUSFS_SUS_KSTAT=y
+          export CONFIG_KSU_SUSFS_SUS_KSTAT_REDIRECT=y
+          export CONFIG_KSU_SUSFS_SUS_MAP=y
+          export CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+          export CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
+          export CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
+          export CONFIG_KSU_SUSFS_OPENAT=y
+          export CONFIG_KSU_SUSFS_OPENAT2=y
+          export CONFIG_KSU_SUSFS_GETDENTS=y
+          export CONFIG_KSU_SUSFS_HARDENED=y
+          export CONFIG_KSU_SUSFS_HIDDEN_NAME=y
+          export CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
+          export CONFIG_KSU_SUSFS_UNICODE_FILTER=y
+          export CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
+          export CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
+          export CONFIG_KSU_SUSFS_ENABLE_LOG=y
+          export CONFIG_KSU_SUSFS_SUS_PATH=y
+          export CONFIG_KSU_SUSFS_STAT=y
+          # Part 3: ZeroMount
+          export CONFIG_ZEROMOUNT=y
+          # Part 4: OverlayFS / FUSE / TMPFS_XATTR
+          export CONFIG_OVERLAY_FS=y
+          export CONFIG_OVERLAY_FS_REDIRECT_ALWAYS_FOLLOW=y
+          export CONFIG_FUSE_FS=y
+          export CONFIG_FUSE_DAX=y
+          export CONFIG_TMPFS_XATTR=y
+          export CONFIG_TMPFS_POSIX_ACL=y
+          # Part 5: NetHunter attack module drivers
+          export CONFIG_USB_GADGET=y
+          export CONFIG_USB_CONFIGFS=y
+          export CONFIG_USB_CONFIGFS_F_HID=y
+          export CONFIG_UHID=y
+          export CONFIG_NET=y
+          export CONFIG_WIRELESS=y
+          export CONFIG_CFG80211=m
+          export CONFIG_MAC80211=m
+          export CONFIG_NL80211_TESTMODE=y
+          export CONFIG_NETFILTER=y
+          export CONFIG_IP_NF_MANGLE=y
+          export CONFIG_IP6_NF_MANGLE=y
+          # Part 6: NURFS native Linux
+          export CONFIG_BINFMT_MISC=y
+          export CONFIG_BINFMT_ELF=y
+          export CONFIG_COMPAT_BINFMT_ELF=y
+          export CONFIG_DEVTMPFS_MOUNT=y
+          export CONFIG_USER_NS=y
+          export CONFIG_IPC_NS=y
+          export CONFIG_PID_NS=y
+          export CONFIG_NET_NS=y
+          export CONFIG_CGROUP_DEVICE=y
+          export CONFIG_CGROUP_PIDS=y
+          export CONFIG_CGROUP_FREEZER=y
+          export CONFIG_CPUSETS=y
+          export CONFIG_FHANDLE=y
+          export CONFIG_EVENTFD=y
+          export CONFIG_INOTIFY_USER=y
+          export CONFIG_SIGNALFD=y
+          export CONFIG_TIMERFD=y
+          export CONFIG_EPOLL=y
+          export CONFIG_FILE_LOCKING=y
+          export CONFIG_FUTEX=y
+          export CONFIG_FUTEX2=y
+          export CONFIG_CHECKPOINT_RESTORE=y
+          export CONFIG_NAMESPACES=y
+          export CONFIG_UTS_NS=y
+          export CONFIG_MNT_NS=y
+          # Part 7: Native Linux FS (NURFS)
+          export CONFIG_CUSE=y
+          export CONFIG_SQUASHFS=y
+          export CONFIG_SQUASHFS_FILE_CACHE=y
+          export CONFIG_SQUASHFS_FILE_DIRECT=y
+          export CONFIG_SQUASHFS_DECOMP_MULTI_PERCPU=y
+          export CONFIG_NTFS_FS=y
+          export CONFIG_NTFS_RW=y
+          export CONFIG_EXFAT_FS=y
+          export CONFIG_CIFS=y
+          export CONFIG_CIFS_XATTR=y
+          export CONFIG_NLS=y
+          export CONFIG_NLS_CODEPAGE_437=y
+          export CONFIG_NLS_ISO8859_1=y
+          export CONFIG_NLS_UTF8=y
+          # Part 8: ZRAM compressors
+          export CONFIG_ZRAM_WRITEBACK=y
+          export CONFIG_CRYPTO_LZ4=y
+          export CONFIG_CRYPTO_ZSTD=y
+          export CONFIG_CRYPTO_LZO=y
+          export CONFIG_CRYPTO_LZ4HC=y
+          # Part 9: Required for loadable modules
+          export CONFIG_MODULES=y
+          export CONFIG_MODULE_UNLOAD=y
+          export CONFIG_MODVERSIONS=y
+          export CONFIG_KALLSYMS=y
+          # Part 10: KPM (Kernel Patch Module) - loadable .ko support
+          export CONFIG_KPM=y
+          # Part 11: HIDELKM (hide loadable modules from /proc/modules)
+          export CONFIG_HIDELKM=y
+          # Part 12: Kotoamatsukami obfuscation target (LKM ftrace hook)
+          export CONFIG_FTRACE=y
+          export CONFIG_FUNCTION_TRACER=y
+          export CONFIG_DYNAMIC_FTRACE=y
+          set +a
+
           make O=out ARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CC=clang LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- \
