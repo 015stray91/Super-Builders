@@ -9,36 +9,6 @@ on:
       kernel_branch:
         required: true
         type: string
-      kernel_source_url:
-        type: string
-        default: "https://github.com/015stray91/kernel-msm-1.git"
-      toolchain_url:
-        type: string
-        default: "https://github.com/015stray91/android-kernel-tools.git"
-      defconfig:
-        type: string
-        default: "ksu-nh.defconfig"
-      nethunter_patches_dir:
-        type: string
-        default: "kali-nethunter-kernel-builder-main/patches/ksu a12-5.10 patches"
-      add_susfs:
-        type: boolean
-        default: true
-      add_zeromount:
-        type: boolean
-        default: true
-      add_zram:
-        type: boolean
-        default: true
-      add_overlayfs:
-        type: boolean
-        default: true
-      add_kpm:
-        type: boolean
-        default: true
-      add_nethunter:
-        type: boolean
-        default: true
 
 env:
   ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
@@ -50,12 +20,40 @@ jobs:
     timeout-minutes: 120
 
     steps:
-      - name: Checkout Device Profile
+      - name: Checkout Super-Builders (for device-profiles.json)
         uses: actions/checkout@v4
         with:
-          sparse-checkout: |
-            device-profiles.json
-          sparse-checkout-cone-mode: false
+          path: super-builders
+          fetch-depth: 1
+
+      - name: Read Device Profile
+        id: profile
+        run: |
+          PROFILE_FILE="super-builders/device-profiles.json"
+          CODENAME="${{ inputs.device_codename }}"
+          PROFILE=$(jq -r ".devices.\"${CODENAME}\" // empty" "$PROFILE_FILE")
+          if [ -z "$PROFILE" ] || [ "$PROFILE" = "null" ]; then
+            echo "ERROR: device '$CODENAME' not in device-profiles.json"
+            cat "$PROFILE_FILE"
+            exit 1
+          fi
+          echo "=== Profile for $CODENAME ==="
+          echo "$PROFILE" | jq .
+
+          echo "kernel_source=$(echo "$PROFILE" | jq -r .kernel_source)" >> $GITHUB_OUTPUT
+          echo "kernel_branch=$(echo "$PROFILE" | jq -r .kernel_branch)" >> $GITHUB_OUTPUT
+          echo "toolchain=$(echo "$PROFILE" | jq -r .toolchain)" >> $GITHUB_OUTPUT
+          echo "defconfig=$(echo "$PROFILE" | jq -r .defconfig)" >> $GITHUB_OUTPUT
+          echo "vendor_config=$(echo "$PROFILE" | jq -r .vendor_config)" >> $GITHUB_OUTPUT
+          echo "debug_config=$(echo "$PROFILE" | jq -r .debug_config)" >> $GITHUB_OUTPUT
+          echo "nurfs_fragment=$(echo "$PROFILE" | jq -r .nurfs_fragment)" >> $GITHUB_OUTPUT
+          echo "nethunter_patches=$(echo "$PROFILE" | jq -r .nethunter_patches)" >> $GITHUB_OUTPUT
+          echo "add_susfs=$(echo "$PROFILE" | jq -r .add_susfs)" >> $GITHUB_OUTPUT
+          echo "add_zeromount=$(echo "$PROFILE" | jq -r .add_zeromount)" >> $GITHUB_OUTPUT
+          echo "add_zram=$(echo "$PROFILE" | jq -r .add_zram)" >> $GITHUB_OUTPUT
+          echo "add_overlayfs=$(echo "$PROFILE" | jq -r .add_overlayfs)" >> $GITHUB_OUTPUT
+          echo "add_kpm=$(echo "$PROFILE" | jq -r .add_kpm)" >> $GITHUB_OUTPUT
+          echo "add_nethunter=$(echo "$PROFILE" | jq -r .add_nethunter)" >> $GITHUB_OUTPUT
 
       - name: Maximize Build Space
         uses: easimon/maximize-build-space@master
@@ -71,22 +69,24 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y bc bison flex libssl-dev libelf-dev cpio kmod python3 \
             lz4 liblz4-tool libncurses-dev rsync zip curl wget make device-tree-compiler \
-            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu lld-12 llvm-12 git-lfs patch
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu lld-12 llvm-12 git-lfs patch jq
           sudo ln -sf /usr/bin/ld.lld-12 /usr/local/bin/ld.lld
           sudo ln -sf /usr/bin/ld.lld-12 /usr/local/bin/ld64.lld
 
-      - name: Clone Toolchain (from profile)
+      - name: Clone Toolchain
         run: |
-          TOOLCHAIN_URL="${{ inputs.toolchain_url }}"
+          TOOLCHAIN_URL="${{ steps.profile.outputs.toolchain }}"
           git clone --depth=1 "$TOOLCHAIN_URL" compiler-node
           echo "=== Clang ==="; ls compiler-node/clang/host/linux-x86/
           echo "=== GCC ==="; ls compiler-node/gcc/linux-x86/aarch64/
 
-      - name: Clone Kernel Source (from profile)
+      - name: Clone Kernel Source
         run: |
-          BRANCH="${{ inputs.kernel_branch }}"
-          [ -z "$BRANCH" ] && BRANCH="android-14-release-u1tgns34.42-86-2-32"
-          git clone --depth=1 -b "$BRANCH" "${{ inputs.kernel_source_url }}" kernel-source
+          BRANCH="${{ steps.profile.outputs.kernel_branch }}"
+          if [ -z "$BRANCH" ] || [ "$BRANCH" = "null" ]; then
+            BRANCH="${{ inputs.kernel_branch }}"
+          fi
+          git clone --depth=1 -b "$BRANCH" "${{ steps.profile.outputs.kernel_source }}" kernel-source
           rm -rf kernel-source/tools/toolchains/snapdragon-toolchain
 
       - name: Setup Toolchain
@@ -101,13 +101,13 @@ jobs:
           echo "=== aarch64-gcc ==="; ls tools/toolchains/snapdragon-toolchain/gcc/linux-x86/aarch64/gcc-linaro-7.5.0/bin/aarch64-linux-gnu-gcc
 
       - name: Apply NetHunter Patches
-        if: ${{ inputs.add_nethunter }}
+        if: ${{ steps.profile.outputs.add_nethunter == 'true' }}
         run: |
           cd kernel-source
-          NH_PATCHES_DIR="${{ inputs.nethunter_patches_dir }}"
-          if [ -d "$NH_PATCHES_DIR" ]; then
-            echo "=== Applying NetHunter patches from $NH_PATCHES_DIR ==="
-            for patch in "$NH_PATCHES_DIR"/*.patch; do
+          NH_DIR="${{ steps.profile.outputs.nethunter_patches }}"
+          if [ -d "$NH_DIR" ]; then
+            echo "=== Applying NetHunter patches from $NH_DIR ==="
+            for patch in "$NH_DIR"/*.patch; do
               if [ -f "$patch" ]; then
                 echo "  -> $(basename $patch)"
                 patch -p1 -N --dry-run < "$patch" 2>/dev/null && \
@@ -116,18 +116,22 @@ jobs:
               fi
             done
           else
-            echo "WARNING: NetHunter patches dir $NH_PATCHES_DIR not found in repo"
+            echo "WARNING: NetHunter patches dir $NH_DIR not found in repo"
             echo "NetHunter patches are NOT being applied"
           fi
 
       - name: Validate Curated Configs
         run: |
           cd kernel-source
+          DEFCONFIG="${{ steps.profile.outputs.defconfig }}"
+          VENDOR="${{ steps.profile.outputs.vendor_config }}"
+          DEBUG_C="${{ steps.profile.outputs.debug_config }}"
+          NURFS="${{ steps.profile.outputs.nurfs_fragment }}"
           echo "=== 4 curated configs ==="
-          wc -l arch/arm64/configs/${{ inputs.defconfig }} \
-                 arch/arm64/configs/vendor/moto-parrot-sm6450.config \
-                 arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config \
-                 arch/arm64/configs/nurfs-linux.fragment
+          wc -l "arch/arm64/configs/${DEFCONFIG}" \
+                 "${VENDOR}" \
+                 "${DEBUG_C}" \
+                 "${NURFS}"
 
       - name: Patch Kernel Source
         run: |
@@ -159,11 +163,15 @@ jobs:
           cd kernel-source
           mkdir -p out
 
+          DEFCONFIG="${{ steps.profile.outputs.defconfig }}"
+          VENDOR="${{ steps.profile.outputs.vendor_config }}"
+          DEBUG_C="${{ steps.profile.outputs.debug_config }}"
+          NURFS="${{ steps.profile.outputs.nurfs_fragment }}"
+
           python3 scripts/kconfig/merge_nuki.py \
-            --base arch/arm64/configs/${{ inputs.defconfig }} \
-            --middle arch/arm64/configs/vendor/moto-parrot-sm6450.config \
-            --ending arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config \
-                     arch/arm64/configs/nurfs-linux.fragment \
+            --base "arch/arm64/configs/${DEFCONFIG}" \
+            --middle "${VENDOR}" \
+            --ending "${DEBUG_C}" "${NURFS}" \
             -o out/.config
 
           make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \

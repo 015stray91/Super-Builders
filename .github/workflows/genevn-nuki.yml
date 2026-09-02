@@ -1,9 +1,19 @@
 name: AnyRealm NUKI - Genevn SM6450
 
-# NUKI = Native Unified Kernel Image | NURFS = Native Unified RootFS
-# Routes to build-ksu-next.yml with KSU-Next + NetHunter flags.
+# Thin dispatcher: download deps → build via build-ksu-next.yml
+# All device params come from device-profiles.json
 
 on:
+  workflow_dispatch:
+    inputs:
+      device_codename:
+        description: "Device codename"
+        type: string
+        default: "genevn-g"
+      kernel_branch:
+        description: "kernel-msm-1 branch (overrides profile)"
+        type: string
+        default: ""
   workflow_call:
     inputs:
       device_codename:
@@ -14,19 +24,16 @@ on:
         required: true
 
 jobs:
+  download-dependencies:
+    uses: ./.github/workflows/cache-dependencies.yml
+    permissions:
+      contents: read
+      actions: write
+
   build:
+    needs: [download-dependencies]
     uses: ./.github/workflows/build-ksu-next.yml
     secrets: inherit
     with:
       device_codename: ${{ inputs.device_codename }}
       kernel_branch: ${{ inputs.kernel_branch }}
-      kernel_source_url: "https://github.com/015stray91/kernel-msm-1.git"
-      toolchain_url: "https://github.com/015stray91/android-kernel-tools.git"
-      defconfig: "ksu-nh.defconfig"
-      nethunter_patches_dir: "kali-nethunter-kernel-builder-main/patches/ksu a12-5.10 patches"
-      add_susfs: true
-      add_zeromount: true
-      add_zram: true
-      add_overlayfs: true
-      add_kpm: true
-      add_nethunter: true
