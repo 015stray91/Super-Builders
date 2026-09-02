@@ -241,9 +241,10 @@ jobs:
           export CONFIG_FTRACE=y
           export CONFIG_FUNCTION_TRACER=y
           export CONFIG_DYNAMIC_FTRACE=y
-          # Part 13: Build hygiene (prevent WERROR/COMPILE_TEST prompts)
+          # Part 13: Build hygiene (prevent WERROR/COMPILE_TEST/TRIM_UNUSED_KSYMS prompts)
           export CONFIG_WERROR=n
           export CONFIG_COMPILE_TEST=n
+          export CONFIG_TRIM_UNUSED_KSYMS=n
           set +a
 
           # Pipe 'yes ""' to auto-answer Kconfig prompts that arise from sparse .config
