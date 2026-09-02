@@ -114,10 +114,10 @@ jobs:
             --middle arch/arm64/configs/vendor/moto-parrot-sm6450.config arch/arm64/configs/vendor/ext_config/moto-parrot-genevn.config arch/arm64/configs/vendor/ext_config/debug-parrot-genevn.config \
             --ending arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config arch/arm64/configs/nurfs-linux.fragment \
             -o out/.config || cp arch/arm64/configs/ksu-nh.defconfig out/.config
-          make O=out ARCH=arm64 LLVM=-12 LLVM_IAS=-12 olddefconfig
-          # Re-apply ending flags AFTER olddefconfig (sequential buildup - ending overwrites olddefconfig's defaults)
+          # NO olddefconfig (it resets to Kconfig defaults - we want raw sequential buildup)
+          # Append ending configs AGAIN to force-override middle (this is the real "sequential buildup" pattern)
           cat arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config arch/arm64/configs/nurfs-linux.fragment >> out/.config
-          # Re-apply sacred base flags last (KALLSYMS, KSU, etc. that middle might scrub)
+          # Force-inject sacred base flags at the END so middle/sed/anything can't scrub them
           for flag in CONFIG_KSU=y CONFIG_KSU_SUSFS=y CONFIG_ZEROMOUNT=y CONFIG_OVERLAY_FS=y CONFIG_FUSE_FS=y CONFIG_TMPFS_XATTR=y CONFIG_USER_NS=y CONFIG_IPC_NS=y CONFIG_CGROUP_DEVICE=y CONFIG_FHANDLE=y CONFIG_SQUASHFS=y CONFIG_ANDROID_BINDER_IPC=y CONFIG_ASHMEM=y CONFIG_ZRAM=y; do
             key="${flag%=*}"
             sed -i "s/^# $key is not set$/$flag/" out/.config
@@ -137,7 +137,7 @@ jobs:
           sed -i 's/CONFIG_MODVERSIONS=y/# CONFIG_MODVERSIONS is not set/' out/.config
           echo "=== Bypassed TRIM_UNUSED_KSYMS/ANDROID_SYMLINKS/MODVERSIONS in out/.config ==="
           grep -E "TRIM_UNUSED_KSYMS|ANDROID_SYMLINKS|MODVERSIONS" out/.config | head -5
-          # Re-force sacred flags after sed (sed may have killed them)
+          # Re-inject sacred flags after sed
           for flag in CONFIG_KSU=y CONFIG_KSU_SUSFS=y CONFIG_ZEROMOUNT=y CONFIG_OVERLAY_FS=y CONFIG_FUSE_FS=y CONFIG_TMPFS_XATTR=y CONFIG_USER_NS=y CONFIG_IPC_NS=y CONFIG_CGROUP_DEVICE=y CONFIG_FHANDLE=y CONFIG_SQUASHFS=y CONFIG_ANDROID_BINDER_IPC=y CONFIG_ASHMEM=y CONFIG_ZRAM=y; do
             key="${flag%=*}"
             sed -i "s/^# $key is not set$/$flag/" out/.config
