@@ -24,6 +24,12 @@ jobs:
     env:
       ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
     steps:
+      - name: Checkout Super-Builders (for patches + helpers)
+        uses: actions/checkout@v4
+        with:
+          path: super-builders
+          fetch-depth: 1
+
       - name: Install Dependencies (jammy - clang12 safe)
         run: |
           sudo apt-get update
@@ -67,10 +73,10 @@ jobs:
           cd kernel-source
           # In CI, Super-Builders is the workspace root. From kernel-source/,
           # the paths are:
-          #   ../android12-5.10/KernelSU-Next/build-helpers/
-          #   ../android12-5.10/KernelSU-Next/patches/    (NOTE: 'patches', not 'Ksu-patches')
-          HELPER="../android12-5.10/KernelSU-Next/build-helpers"
-          KSU_PATCHES="../android12-5.10/KernelSU-Next/patches"
+          #   super-builders/android12-5.10/KernelSU-Next/build-helpers/
+          #   super-builders/android12-5.10/KernelSU-Next/patches/    (NOTE: 'patches', not 'Ksu-patches')
+          HELPER="../super-builders/android12-5.10/KernelSU-Next/build-helpers"
+          KSU_PATCHES="../super-builders/android12-5.10/KernelSU-Next/patches"
           SUBLEVEL=$(grep "^SUBLEVEL =" Makefile | head -1 | awk '{print $3}')
 
           # 1) bypass-oem-abi: strips GKI protected_exports, disables TRIM in gki_defconfig
