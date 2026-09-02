@@ -155,6 +155,9 @@ jobs:
           # CIFS_SMBD conflicts with cifs_listxattr (cifsfs.h #define cifs_listxattr NULL
           # when SMBD is on, then xattr.c redefines function = syntax error)
           sed -i 's/^CONFIG_CIFS_SMBD=y/# CONFIG_CIFS_SMBD is not set/' out/.config
+          # CIFS itself has a CONFIG_CIFS_XATTR sub-define that breaks when y.
+          # Disable CIFS entirely (we don't need it; NURFS uses other FS layers)
+          sed -i 's/^CONFIG_CIFS=y/# CONFIG_CIFS is not set/' out/.config
           # Ensure QCOM_SMEM and SCHED_WALT are enabled (fixes source-level dependencies)
           grep -q "^# CONFIG_QCOM_SMEM is not set" out/.config && \
             sed -i 's/^# CONFIG_QCOM_SMEM is not set/CONFIG_QCOM_SMEM=y/' out/.config || true
@@ -317,10 +320,16 @@ jobs:
           export CONFIG_TRIM_UNUSED_KSYMS=n
           set +a
 
-          # Pipe 'yes ""' to auto-answer Kconfig prompts that arise from sparse .config
-          # (merge_nuki.py pure-union leaves many CONFIGs unset, which triggers
-          #  silentoldconfig interactive questions - 'yes ""' accepts all defaults)
-          yes '' | make O=out ARCH=arm64 \
+          # Use silentoldconfig (auto-accept all defaults from .config, no prompts)
+          # This avoids 'yes' re-enabling things like CIFS that aren't set
+          make O=out ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CC=clang LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- \
+            LLVM=-12 LLVM_IAS=-12 \
+            silentoldconfig 2>&1 | tail -3 || true
+
+          # Now build with the fully-resolved config
+          make O=out ARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CC=clang LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- \
             LLVM=-12 LLVM_IAS=-12 \
