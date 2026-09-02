@@ -151,6 +151,8 @@ jobs:
         run: |
           cd kernel-source
           export ARCH=arm64 SUBARCH=arm64
+          export HOSTCFLAGS="-I../include -I../include/uapi -I../usr/include -Iout/include -Iout/include/generated -Iout/include/uapi"
+          export HOSTINCLUDE="-I../include -I../include/uapi -Iout/include -Iout/include/generated"
           if [ -x "$KOTO_WRAPPER" ] && [ -x "$HOME/compiler-node/kits/llvm-full/llvm-17.0.6/bin/clang-17" ]; then
             echo "Using Kotoamatsukami LLVM-17 obfuscator (stupefier) - Mist over fs/koto/** and susfs*"
             export PATH="$HOME/compiler-node/kits/llvm-full/llvm-17.0.6/bin:$HOME/compiler-node/kits/llvm-full/llvm-17.0.6/bin/clang-17:$PATH"
@@ -173,7 +175,7 @@ jobs:
           # If make triggers syncconfig / olddefconfig, pipe `yes ""` to auto-answer prompts with
           # empty lines (default). The compile step otherwise fails with "Error in reading" because
           # there is no tty on GH Actions.
-          yes "" | make -j$(nproc --all) O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$CC" HOSTCC=gcc LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CLANG_TRIPLE=aarch64-linux-gnu- LLVM=-12 LLVM_IAS=-12 Image.lz4 modules 2>&1 | tee ../build.log
+          yes "" | make -j$(nproc --all) O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$CC" HOSTCC=gcc LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CLANG_TRIPLE=aarch64-linux-gnu- LLVM=-12 LLVM_IAS=-12 HOSTCFLAGS="-I../include -I../include/uapi -I../tools/include -Iout/include -Iout/include/generated -Iout/include/generated/uapi" Image.lz4 modules 2>&1 | tee ../build.log
           ls -lh out/arch/arm64/boot/Image.lz4 || (echo "FAIL"; tail -100 ../build.log; exit 1)
           mkdir -p ../modules
           find out -name "*.ko" -exec cp {} ../modules/ \;
