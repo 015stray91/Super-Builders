@@ -33,14 +33,11 @@ jobs:
           mkdir -p out
           
           # Merge NUKI configurations - NO GKI (GKI reverts to stock)
-          ./scripts/kconfig/merge_config.sh -m -O out \
-            arch/arm64/configs/ksu-nh.defconfig \
-            arch/arm64/configs/consolidate.fragment \
-            arch/arm64/configs/defconfig.fragment \
-            arch/arm64/configs/vendor/moto-parrot-sm6450.config \
-            arch/arm64/configs/vendor/ext_config/debug-parrot-genevn.config \
-            arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config \
-            arch/arm64/configs/nurfs-linux.fragment
+          python3 scripts/kconfig/merge_nuki.py \
+            --base arch/arm64/configs/ksu-nh.defconfig \
+            --middle arch/arm64/configs/consolidate.fragment arch/arm64/configs/defconfig.fragment arch/arm64/configs/vendor/moto-parrot-sm6450.config arch/arm64/configs/vendor/ext_config/debug-parrot-genevn.config \
+            --ending arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config arch/arm64/configs/nurfs-linux.fragment \
+            -o out/.config
           make ARCH=arm64 O=out olddefconfig
 
       - name: Build Kernel

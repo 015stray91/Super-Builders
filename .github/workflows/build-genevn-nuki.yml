@@ -51,14 +51,11 @@ jobs:
         run: |
           cd kernel-source
           mkdir -p out
-          ./scripts/kconfig/merge_config.sh -m -O out \
-            arch/arm64/configs/ksu-nh.defconfig \
-            arch/arm64/configs/consolidate.fragment \
-            arch/arm64/configs/defconfig.fragment \
-            arch/arm64/configs/vendor/moto-parrot-sm6450.config \
-            arch/arm64/configs/vendor/ext_config/debug-parrot-genevn.config \
-            arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config \
-            arch/arm64/configs/nurfs-linux.fragment || cp arch/arm64/configs/ksu-nh.defconfig out/.config
+          python3 scripts/kconfig/merge_nuki.py \
+            --base arch/arm64/configs/ksu-nh.defconfig \
+            --middle arch/arm64/configs/consolidate.fragment arch/arm64/configs/defconfig.fragment arch/arm64/configs/vendor/moto-parrot-sm6450.config arch/arm64/configs/vendor/ext_config/debug-parrot-genevn.config \
+            --ending arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config arch/arm64/configs/nurfs-linux.fragment \
+            -o out/.config || cp arch/arm64/configs/ksu-nh.defconfig out/.config
           make O=out ARCH=arm64 olddefconfig
           for f in CONFIG_KSU CONFIG_KSU_SUSFS CONFIG_ZEROMOUNT CONFIG_OVERLAY_FS CONFIG_FUSE_FS CONFIG_TMPFS_XATTR CONFIG_USER_NS CONFIG_IPC_NS CONFIG_CGROUP_DEVICE CONFIG_FHANDLE CONFIG_SQUASHFS CONFIG_ANDROID_BINDER_IPC CONFIG_ASHMEM CONFIG_ZRAM; do grep -q "^${f}=y" out/.config && echo " PASS $f" || echo " FAIL $f"; done
           grep default_compressor drivers/block/zram/zram_drv.c | head -1
