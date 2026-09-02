@@ -241,9 +241,15 @@ jobs:
           export CONFIG_FTRACE=y
           export CONFIG_FUNCTION_TRACER=y
           export CONFIG_DYNAMIC_FTRACE=y
+          # Part 13: Build hygiene (prevent WERROR/COMPILE_TEST prompts)
+          export CONFIG_WERROR=n
+          export CONFIG_COMPILE_TEST=n
           set +a
 
-          make O=out ARCH=arm64 \
+          # Pipe 'yes ""' to auto-answer Kconfig prompts that arise from sparse .config
+          # (merge_nuki.py pure-union leaves many CONFIGs unset, which triggers
+          #  silentoldconfig interactive questions - 'yes ""' accepts all defaults)
+          yes '' | make O=out ARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CC=clang LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- \
             LLVM=-12 LLVM_IAS=-12 \
