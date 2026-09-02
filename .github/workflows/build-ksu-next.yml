@@ -1,166 +1,200 @@
-name: Custom Kernel Compiler
+name: KSU-Next + NetHunter Compile
 
 on:
   workflow_call:
     inputs:
-      android_version:
-        required: true
-        type: string
-      kernel_version:
-        required: true
-        type: string
-      sub_level:
-        required: true
-        type: string
-      os_patch_level:
-        required: true
-        type: string
       device_codename:
         required: true
         type: string
-      sukisu_commit:
-        required: false
+      kernel_branch:
+        required: true
         type: string
-        default: 'main'
+      kernel_source_url:
+        type: string
+        default: "https://github.com/015stray91/kernel-msm-1.git"
+      toolchain_url:
+        type: string
+        default: "https://github.com/015stray91/android-kernel-tools.git"
+      defconfig:
+        type: string
+        default: "ksu-nh.defconfig"
+      nethunter_patches_dir:
+        type: string
+        default: "kali-nethunter-kernel-builder-main/patches/ksu a12-5.10 patches"
       add_susfs:
-        required: false
         type: boolean
-        default: false
+        default: true
       add_zeromount:
-        required: false
         type: boolean
-        default: false
+        default: true
       add_zram:
-        required: false
         type: boolean
-        default: false
-      add_bbg:
-        required: false
+        default: true
+      add_overlayfs:
         type: boolean
-        default: false
-      add_overlayfs_support:
-        required: false
-        type: boolean
-        default: false
+        default: true
       add_kpm:
-        required: false
         type: boolean
-        default: false
-      add_ptrace_fix:
-        required: false
+        default: true
+      add_nethunter:
         type: boolean
-        default: false
-      add_perf_patches:
-        required: false
-        type: boolean
-        default: false
+        default: true
 
 env:
-  KSU_VARIANT: KernelSU-Next
-  KSU_DIR: KernelSU-Next
+  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
 
 jobs:
-  compile:
+  build:
+    name: "KSU-Next + NH - ${{ inputs.device_codename }}"
     runs-on: ubuntu-22.04
+    timeout-minutes: 120
+
     steps:
-    - name: Free Disk Space
-      uses: endersonmenezes/free-disk-space@v3
-      with:
-        remove_android: true
-        remove_dotnet: true
-        remove_haskell: true
-        remove_tool_cache: true
-        remove_swap: true
-        remove_packages: "azure-cli google-cloud-cli microsoft-edge-stable google-chrome-stable firefox postgresql* temurin-* *llvm* mysql* dotnet-sdk-*"
-        remove_packages_one_command: true
-        remove_folders: "/usr/share/swift /usr/share/miniconda /usr/share/az* /usr/local/lib/node_modules /usr/local/share/chromium /usr/local/share/powershell /usr/local/julia /usr/local/aws-cli /usr/local/aws-sam-cli /usr/share/gradle"
+      - name: Checkout Device Profile
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            device-profiles.json
+          sparse-checkout-cone-mode: false
 
-    - name: Install Toolchain Build Dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y lld binutils git ccache automake flex lzop bison gperf build-essential zip curl zlib1g-dev g++-multilib libxml2-utils bzip2 libbz2-dev libssl-dev libncurses5-dev libgl1-mesa-dev libxml2 lib32z1-dev python3 bc libelf-dev
+      - name: Maximize Build Space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 2048
+          swap-size-mb: 8192
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
 
-    - name: Checkout Build Configurations
-      uses: actions/checkout@v4
+      - name: Install System Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison flex libssl-dev libelf-dev cpio kmod python3 \
+            lz4 liblz4-tool libncurses-dev rsync zip curl wget make device-tree-compiler \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu lld-12 llvm-12 git-lfs patch
+          sudo ln -sf /usr/bin/ld.lld-12 /usr/local/bin/ld.lld
+          sudo ln -sf /usr/bin/ld.lld-12 /usr/local/bin/ld64.lld
 
-    - name: Set Up Node.js Environment (Node 24)
-      uses: actions/setup-node@v6
-      with:
-        node-version: 24
+      - name: Clone Toolchain (from profile)
+        run: |
+          TOOLCHAIN_URL="${{ inputs.toolchain_url }}"
+          git clone --depth=1 "$TOOLCHAIN_URL" compiler-node
+          echo "=== Clang ==="; ls compiler-node/clang/host/linux-x86/
+          echo "=== GCC ==="; ls compiler-node/gcc/linux-x86/aarch64/
 
-    - name: Set Up Environment Variables
-      run: |
-        echo "KERNEL_ROOT=$GITHUB_WORKSPACE/kernel" >> $GITHUB_ENV
-        echo "ANYKERNEL_DIR=$GITHUB_WORKSPACE/AnyKernel3" >> $GITHUB_ENV
+      - name: Clone Kernel Source (from profile)
+        run: |
+          BRANCH="${{ inputs.kernel_branch }}"
+          [ -z "$BRANCH" ] && BRANCH="android-14-release-u1tgns34.42-86-2-32"
+          git clone --depth=1 -b "$BRANCH" "${{ inputs.kernel_source_url }}" kernel-source
+          rm -rf kernel-source/tools/toolchains/snapdragon-toolchain
 
-    - name: Fetch Clean AnyKernel3 Base Template
-      run: |
-        git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git "$GITHUB_WORKSPACE/AnyKernel3"
-        rm -rf "$GITHUB_WORKSPACE/AnyKernel3/.git"
+      - name: Setup Toolchain
+        run: |
+          cd kernel-source
+          mkdir -p tools/toolchains/snapdragon-toolchain
+          mkdir -p tools/toolchains/snapdragon-toolchain/gcc/linux-x86/aarch64
+          cp -r ../compiler-node/clang/host/linux-x86/clang-r416183b tools/toolchains/snapdragon-toolchain/
+          cp -r ../compiler-node/gcc/linux-x86/aarch64/gcc-linaro-7.5.0 tools/toolchains/snapdragon-toolchain/gcc/linux-x86/aarch64/
+          rm -rf ../compiler-node
+          echo "=== llvm-ar ==="; ls tools/toolchains/snapdragon-toolchain/clang-r416183b/bin/llvm-ar
+          echo "=== aarch64-gcc ==="; ls tools/toolchains/snapdragon-toolchain/gcc/linux-x86/aarch64/gcc-linaro-7.5.0/bin/aarch64-linux-gnu-gcc
 
-    - name: Sync Android Common Kernel Source Tree
-      run: |
-        mkdir -p "$GITHUB_WORKSPACE/kernel"
-        cd "$GITHUB_WORKSPACE/kernel"
-        git clone --depth=1 -b android-${{ inputs.android_version }}-${{ inputs.kernel_version }} https://android.googlesource.com/kernel/common common
+      - name: Apply NetHunter Patches
+        if: ${{ inputs.add_nethunter }}
+        run: |
+          cd kernel-source
+          NH_PATCHES_DIR="${{ inputs.nethunter_patches_dir }}"
+          if [ -d "$NH_PATCHES_DIR" ]; then
+            echo "=== Applying NetHunter patches from $NH_PATCHES_DIR ==="
+            for patch in "$NH_PATCHES_DIR"/*.patch; do
+              if [ -f "$patch" ]; then
+                echo "  -> $(basename $patch)"
+                patch -p1 -N --dry-run < "$patch" 2>/dev/null && \
+                  patch -p1 -N < "$patch" || \
+                  echo "  ! $(basename $patch) failed to apply cleanly, continuing"
+              fi
+            done
+          else
+            echo "WARNING: NetHunter patches dir $NH_PATCHES_DIR not found in repo"
+            echo "NetHunter patches are NOT being applied"
+          fi
 
-    - name: Integrate KernelSU-Next Submodule Source Tree
-      run: |
-        cd "$GITHUB_WORKSPACE/kernel/common"
-        curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/main/kernel/setup.sh" | bash -s ${{ inputs.sukisu_commit }}
+      - name: Validate Curated Configs
+        run: |
+          cd kernel-source
+          echo "=== 4 curated configs ==="
+          wc -l arch/arm64/configs/${{ inputs.defconfig }} \
+                 arch/arm64/configs/vendor/moto-parrot-sm6450.config \
+                 arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config \
+                 arch/arm64/configs/nurfs-linux.fragment
 
-    - name: Apply Configured Custom Backports & Optimizations
-      run: |
-        cd "$GITHUB_WORKSPACE/kernel/common"
-        if [ "${{ inputs.add_ptrace_fix }}" = "true" ]; then
-          echo "Applying ptrace security bypass tracking mitigation..."
-        fi
-        if [ "${{ inputs.add_perf_patches }}" = "true" ]; then
-          echo "Applying scheduling priority structures and block subsystem performance patches..."
-        fi
-        if [ "${{ inputs.add_zeromount }}" = "true" ]; then
-          echo "Setting up ZeroMount logic flags..."
-        fi
-        if [ "${{ inputs.add_bbg }}" = "true" ]; then
-          echo "Injecting Baseband Guard isolation structures..."
-        fi
+      - name: Patch Kernel Source
+        run: |
+          cd kernel-source
 
-    - name: Run Toolchain Kernel Compilation
-      run: |
-        cd "$GITHUB_WORKSPACE/kernel/common"
-        echo "Simulating cross-compilation pipeline deployment..."
-        mkdir -p out
-        echo "Placeholder raw compiled image stream payload" > out/Image
+          cat > include/linux/lz4_arm64_decompress.h << 'LZ4EOF'
+          #ifndef _KOTO_LZ4_ARM64_DECOMPRESS_H
+          #define _KOTO_LZ4_ARM64_DECOMPRESS_H
+          #include <linux/types.h>
+          ssize_t LZ4_arm64_decompress_safe(const void *source, void *dest,
+                                            size_t inputSize, size_t outputSize,
+                                            bool dip);
+          #endif
+          LZ4EOF
 
-    - name: Package Target Deployment Archive Package
-      run: |
-        cp "$GITHUB_WORKSPACE/kernel/common/out/Image" "$GITHUB_WORKSPACE/AnyKernel3/"
-        cd "$GITHUB_WORKSPACE/AnyKernel3"
-        zip -r9 "$GITHUB_WORKSPACE/${{ inputs.device_codename }}-KernelSU-Next-Build.zip" *
+          for f in $(grep -rl "LZ4_arm64_decompress_safe" --include="*.c" . 2>/dev/null); do
+            if ! grep -q 'lz4_arm64_decompress.h' "$f"; then
+              echo "Patching: $f"
+              sed -i '/^#include <linux\/lz4.h>/a #include <linux/lz4_arm64_decompress.h>' "$f"
+            fi
+          done
 
-    - name: Generate Action Summary Compilation Analytics Report
-      run: |
-        S() { [[ "$1" == "true" ]] && echo "Enabled" || echo "Disabled"; }
-        {
-          echo "## KernelSU-Next Compilation Deployment Manifest"
-          echo ""
-          echo "| Build Metric Component Structure | Configuration State Target |"
-          echo "|----------------------------------|---------------------------|"
-          echo "| **Kernel Tree Line Version**    | ${{ inputs.kernel_version }}.${{ inputs.sub_level }} |"
-          echo "| **Android Baseline Framework**   | ${{ inputs.android_version }} |"
-          echo "| **OS Security Patch String**     | ${{ inputs.os_patch_level }} |"
-          echo "| **Enhanced SUSFS Engine**        | $(S "${{ inputs.add_susfs }}") |"
-          echo "| **ZeroMount Framework Layer**    | $(S "${{ inputs.add_zeromount }}") |"
-          echo "| **ZRAM Cache Speed Extension**   | $(S "${{ inputs.add_zram }}") |"
-          echo "| **Baseband Guard Isolation**     | $(S "${{ inputs.add_bbg }}") |"
-          echo "| **OverlayFS System Core Support**| $(S "${{ inputs.add_overlayfs_support }}") |"
-          echo "| **KPM Target Virtual Hook Space**| $(S "${{ inputs.add_kpm }}") |"
-          echo "| **Device Ident Target Codename** | ${{ inputs.device_codename }} |"
-          echo "| **SukiSu Target Commit Target**  | ${{ inputs.sukisu_commit }} |"
-        } >> "$GITHUB_STEP_SUMMARY"
+          if ! grep -q 'DEFAULT_UNSHARE_KSU_MNT_ID' fs/namespace.c; then
+            sed -i '/^#include <uapi\/linux\/mount.h>/a #ifndef DEFAULT_UNSHARE_KSU_MNT_ID\n#define DEFAULT_UNSHARE_KSU_MNT_ID 100000\n#endif' fs/namespace.c
+          fi
 
-    - name: Upload Finished Deployment Output Artifact Base
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ inputs.device_codename }}-KernelSU-Next-Deployment
-        path: "${{ github.workspace }}/*.zip"
+      - name: Configure Kernel
+        run: |
+          cd kernel-source
+          mkdir -p out
+
+          python3 scripts/kconfig/merge_nuki.py \
+            --base arch/arm64/configs/${{ inputs.defconfig }} \
+            --middle arch/arm64/configs/vendor/moto-parrot-sm6450.config \
+            --ending arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config \
+                     arch/arm64/configs/nurfs-linux.fragment \
+            -o out/.config
+
+          make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CC=clang HOSTCC=gcc LLVM=-12 LLVM_IAS=-12 silentoldconfig 2>&1 | tail -5
+
+          echo "=== .config: $(grep -c '^CONFIG_' out/.config) CONFIGs ==="
+          for f in CONFIG_KSU CONFIG_KSU_SUSFS CONFIG_ZEROMOUNT CONFIG_OVERLAY_FS \
+                   CONFIG_FUSE_FS CONFIG_ZRAM CONFIG_KALLSYMS CONFIG_MODULES \
+                   CONFIG_ARM64 CONFIG_QCOM_EUD CONFIG_KPM; do
+            grep -q "^${f}=y" out/.config && echo " PASS $f" || echo " FAIL $f"
+          done
+
+      - name: Compile NUKI
+        run: |
+          cd kernel-source
+          make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            -j$(nproc --all) Image.lz4 modules 2>&1 | tee ../build.log
+          ls -lh out/arch/arm64/boot/Image.lz4 || (echo "BUILD FAILED"; tail -100 ../build.log; exit 1)
+          mkdir -p ../modules
+          find out -name "*.ko" -exec cp {} ../modules/ \;
+
+      - name: Upload NUKI
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: AnyRealm-NUKI-${{ inputs.device_codename }}-${{ github.run_number }}
+          path: |
+            kernel-source/out/arch/arm64/boot/Image.lz4
+            kernel-source/out/arch/arm64/boot/Image
+            build.log
+            kernel-source/out/.config
+            modules/
+          compression-level: 9
+          overwrite: true
