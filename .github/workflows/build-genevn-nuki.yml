@@ -140,10 +140,18 @@ jobs:
           # Belt-and-suspenders: stub out the AOSP-internal GKI abi_symbollist.raw
           # path that debug-parrot-genevn references (path is from a different host).
           # NUKI Colonel is GKI 1.0; the GKI 2.0 trim path doesn't apply here.
-          # NOTE: TRIM_UNUSED_KSYMS stays =y (needed for ZeroMount VFS).
-          # The actual GKI symbol check is bypassed by bypass-abi-check.sh below.
           sed -i 's|CONFIG_UNUSED_KSYMS_WHITELIST=.*|CONFIG_UNUSED_KSYMS_WHITELIST=""|g' out/.config 2>/dev/null || true
           grep "KSYMS_WHITELIST" out/.config || echo " UNUSED_KSYMS_WHITELIST: cleared"
+
+          # Ensure critical CONFIGs are in .config (kbuild needs them IN the file, not just env vars)
+          for cfg in CONFIG_FUNCTION_TRACER=y CONFIG_DYNAMIC_FTRACE=y CONFIG_KERNEL_LZ4=y; do
+            key="${cfg%%=*}"
+            val="${cfg#*=}"
+            if ! grep -q "^${key}=" out/.config; then
+              echo "$cfg" >> out/.config
+              echo "  injected $cfg into .config"
+            fi
+          done
 
           # LZ4 NEON deployment (kernel Colonel compression, from deploy_lz4.sh)
           [ -f deploy_lz4.sh ] && chmod +x deploy_lz4.sh && ./deploy_lz4.sh || echo "no deploy_lz4.sh"
