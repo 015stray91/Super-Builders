@@ -158,6 +158,14 @@ jobs:
           # CIFS itself has a CONFIG_CIFS_XATTR sub-define that breaks when y.
           # Disable CIFS entirely (we don't need it; NURFS uses other FS layers)
           sed -i 's/^CONFIG_CIFS=y/# CONFIG_CIFS is not set/' out/.config
+          # Also disable CIFS_XATTR sub-option (kconfig default is Y if unsure)
+          # Kconfig's silentoldconfig uses defaults; we need to set N explicitly
+          if ! grep -q "^# CONFIG_CIFS_XATTR is not set" out/.config; then
+            echo "# CONFIG_CIFS_XATTR is not set" >> out/.config
+          fi
+          if ! grep -q "^# CONFIG_CIFS is not set" out/.config; then
+            sed -i 's/^# CONFIG_CIFS is not set/# CONFIG_CIFS is not set\n# CONFIG_CIFS_XATTR is not set/' out/.config
+          fi
           # Ensure QCOM_SMEM and SCHED_WALT are enabled (fixes source-level dependencies)
           grep -q "^# CONFIG_QCOM_SMEM is not set" out/.config && \
             sed -i 's/^# CONFIG_QCOM_SMEM is not set/CONFIG_QCOM_SMEM=y/' out/.config || true
