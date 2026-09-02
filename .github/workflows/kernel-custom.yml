@@ -1,0 +1,52 @@
+name: Custom Kernel Build
+
+on:
+  workflow_call:
+    inputs:
+      device_codename:
+        type: string
+        default: "generic"
+      kernel_branch:
+        type: string
+        default: "main"
+      ksu_variant:
+        type: string
+        default: "KernelSU-Next"
+      add_susfs:
+        type: boolean
+        default: true
+      add_zeromount:
+        type: boolean
+        default: true
+      add_zram:
+        type: boolean
+        default: true
+      add_bbg:
+        type: boolean
+        default: true
+      add_overlayfs_support:
+        type: boolean
+        default: true
+      add_kpm:
+        type: boolean
+        default: false
+
+jobs:
+  info:
+    name: Custom Build Info
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Print Custom Inputs
+        run: |
+          echo "=== Custom Build Configuration ==="
+          echo "device_codename: ${{ inputs.device_codename }}"
+          echo "kernel_branch: ${{ inputs.kernel_branch }}"
+          echo "ksu_variant: ${{ inputs.ksu_variant }}"
+          echo "add_susfs: ${{ inputs.add_susfs }}"
+          echo "add_zeromount: ${{ inputs.add_zeromount }}"
+          echo "add_zram: ${{ inputs.add_zram }}"
+          echo "add_bbg: ${{ inputs.add_bbg }}"
+          echo "add_overlayfs_support: ${{ inputs.add_overlayfs_support }}"
+          echo "add_kpm: ${{ inputs.add_kpm }}"
+          echo "::error::Custom kernel build not yet implemented - use a specific kernel version"
