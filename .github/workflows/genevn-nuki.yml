@@ -4,55 +4,46 @@ name: AnyRealm NUKI - Genevn SM6450
 # Architecture: 3 reusable workflows (toolchain + ksu-nh + qcom-moto) → compile
 
 on:
-  push:
-    branches: [ 015stray91 ]
-  workflow_dispatch:
+  workflow_call:
     inputs:
       device_codename:
-        description: "Device codename"
-        type: choice
-        options:
-          - genevn-g
-          - lake
-        default: "genevn-g"
-      kernel_branch:
-        description: "kernel-msm-1 branch"
-        default: "android-14-release-u1tgns34.42-86-2-32"
         type: string
-
-env:
-  DEVICE_CODENAME: ${{ inputs.device_codename || 'genevn-g' }}
-  KERNEL_BRANCH: ${{ inputs.kernel_branch || 'android-14-release-u1tgns34.42-86-2-32' }}
+        required: true
+      kernel_branch:
+        type: string
+        required: true
 
 jobs:
   # Step 1: Toolchain + Environment
   toolchain:
     uses: ./.github/workflows/nuki-toolchain.yml
     with:
-      device_codename: ${{ env.DEVICE_CODENAME }}
-      kernel_branch: ${{ env.KERNEL_BRANCH }}
+      device_codename: ${{ inputs.device_codename }}
+      kernel_branch: ${{ inputs.kernel_branch }}
 
   # Step 2: KSU + NetHunter + Kernel Source
   ksu-nh:
     uses: ./.github/workflows/nuki-ksu-nh.yml
     with:
-      device_codename: ${{ env.DEVICE_CODENAME }}
-      kernel_branch: ${{ env.KERNEL_BRANCH }}
+      device_codename: ${{ inputs.device_codename }}
+      kernel_branch: ${{ inputs.kernel_branch }}
 
   # Step 3: QCOM + Moto Device Config
   qcom-moto:
     uses: ./.github/workflows/nuki-qcom-moto.yml
     with:
-      device_codename: ${{ env.DEVICE_CODENAME }}
+      device_codename: ${{ inputs.device_codename }}
 
   # Step 4: Build
   build:
-    name: Build NUKI - ${{ env.DEVICE_CODENAME }}
+    name: Build NUKI - ${{ inputs.device_codename }}
     runs-on: ubuntu-22.04
     timeout-minutes: 120
     needs: [toolchain, ksu-nh, qcom-moto]
     env:
       ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
+      DEVICE_CODENAME: ${{ inputs.device_codename }}
+      KERNEL_BRANCH: ${{ inputs.kernel_branch }}
 
     steps:
       - name: Maximize Build Space
@@ -118,7 +109,7 @@ jobs:
           done
 
           if ! grep -q 'DEFAULT_UNSHARE_KSU_MNT_ID' fs/namespace.c; then
-            sed -i '/#include <uapi\/linux\/mount.h>/a #ifndef DEFAULT_UNSHARE_KSU_MNT_ID\n#define DEFAULT_UNSHARE_KSU_MNT_ID 100000\n#endif' fs/namespace.c
+            sed -i '/^#include <uapi\/linux\/mount.h>/a #ifndef DEFAULT_UNSHARE_KSU_MNT_ID\n#define DEFAULT_UNSHARE_KSU_MNT_ID 100000\n#endif' fs/namespace.c
           fi
 
       - name: Configure Kernel
