@@ -297,8 +297,10 @@ jobs:
           export CONFIG_NTFS_FS=y
           export CONFIG_NTFS_RW=y
           export CONFIG_EXFAT_FS=y
-          export CONFIG_CIFS=y
-          export CONFIG_CIFS_XATTR=y
+          # CIFS has cifs_listxattr conflict (cifsfs.h macro)
+          export CONFIG_CIFS=n
+          export CONFIG_CIFS_XATTR=n
+          export CONFIG_CIFS_SMBD=n
           export CONFIG_NLS=y
           export CONFIG_NLS_CODEPAGE_437=y
           export CONFIG_NLS_ISO8859_1=y
