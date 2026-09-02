@@ -176,7 +176,16 @@ jobs:
             -o out/.config
 
           make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
-            CC=clang HOSTCC=gcc LLVM=-12 LLVM_IAS=-12 silentoldconfig 2>&1 | tail -5
+            CC=clang HOSTCC=gcc LLVM=-12 LLVM_IAS=-12 allnoconfig 2>&1 | tail -3
+
+          python3 scripts/kconfig/merge_nuki.py \
+            --base "arch/arm64/configs/${DEFCONFIG}" \
+            --middle "${VENDOR}" \
+            --ending "${DEBUG_C}" "${NURFS}" \
+            -o out/.config
+
+          yes '' | make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CC=clang HOSTCC=gcc LLVM=-12 LLVM_IAS=-12 olddefconfig 2>&1 | tail -5
 
           echo "=== .config: $(grep -c '^CONFIG_' out/.config) CONFIGs ==="
           for f in CONFIG_KSU CONFIG_KSU_SUSFS CONFIG_ZEROMOUNT CONFIG_OVERLAY_FS \
