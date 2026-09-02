@@ -62,6 +62,7 @@ jobs:
             KernelSU-Next-tmp
           cd KernelSU-Next-tmp
           git sparse-checkout set KernelSU-Next/Ksu-patches KernelSU-Next/build-helpers
+          rm -rf ../KernelSU-Next
           mv KernelSU-Next ..
           cd .. && rm -rf KernelSU-Next-tmp
           echo "=== Ksu-patches (seal) ==="
