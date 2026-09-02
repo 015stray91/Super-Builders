@@ -77,7 +77,9 @@ jobs:
       - name: Compile NUKI (root Makefile handles toolchain + HOSTCC=gcc)
         run: |
           cd kernel-source
-          # Root Makefile has AnyRealm toolchain paths embedded + HOSTCC=gcc hardcoded.
+          # Put snapdragon-toolchain on PATH FIRST so recursive make finds llvm-ar/llvm-nm/llvm-objdump
+          # Root Makefile's CC/LD/AR etc are exported, but recursive make re-spawns from out/ subdir
+          export PATH="$PWD/tools/toolchains/snapdragon-toolchain/clang-r416183b/bin:$PWD/tools/toolchains/snapdragon-toolchain/gcc/linux-x86/aarch64/gcc-linaro-7.5.0/bin:$PATH"
           # Just run make; no env vars needed.
           yes "" | make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
             -j$(nproc --all) Image.lz4 modules 2>&1 | tee ../build.log
