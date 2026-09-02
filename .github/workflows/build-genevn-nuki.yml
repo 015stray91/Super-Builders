@@ -53,14 +53,6 @@ jobs:
           echo "=== Makefile HOSTCC trap: ==="
           grep -A2 "^HOSTCC" kernel-source/Makefile | head -4
 
-      - name: Cache Snapdragon Toolchain
-        uses: actions/cache@v4
-        with:
-          path: kernel-source/tools/toolchains/snapdragon-toolchain
-          key: snapdragon-clang-r416183b-12.0.5-${{ hashFiles('kernel-source/tools/toolchains/snapdragon-toolchain/clang-r416183b/bin/clang') }}
-          restore-keys: |
-            snapdragon-clang-r416183b-
-
       - name: "Merge NUKI Config (A→Z cumulative)"
         run: |
           cd kernel-source
