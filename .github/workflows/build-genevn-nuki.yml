@@ -1,12 +1,14 @@
-name: AnyRealm NUKI - Moto G Stylus 5G 2023 (SM6450 parrot)
+name: AnyRealm NUKI Colonel - Moto G Stylus 5G 2023 (SM6450 parrot)
 
-# NUKI = Native Unified Kernel Image | NURFS = Native Unified RootFS
-# Uses 015stray91/android-kernel-tools build-kernel.sh which runs the
-# bootstrap scripts and sets up the full compiler node correctly.
+# NUKI Colonel = Native Unified Kernel Image, Colonel variant
+# NURFS = Native Unified RootFS (Debian-blended userland)
+# Fully decoupled from upstream parrot/moto/waipio GKI inheritance.
+# No vendor DLKM, no GKI 2.0, no compliance fallbacks.
+# Mirrors /mnt/sda2/kernel-msm-1/build.config.anyrealm.kernel exactly.
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, 015stray91 ]
   workflow_dispatch:
     inputs:
       kernel_branch:
@@ -16,7 +18,7 @@ on:
 
 jobs:
   build:
-    name: "AnyRealm NUKI - Genevn SM6450"
+    name: "AnyRealm NUKI Colonel - Genevn SM6450"
     runs-on: ubuntu-22.04
     timeout-minutes: 120
     env:
@@ -31,78 +33,163 @@ jobs:
           sudo ln -sf /usr/bin/ld.lld-12 /usr/local/bin/ld.lld
           sudo ln -sf /usr/bin/ld.lld-12 /usr/local/bin/ld64.lld
 
-      - name: Clone NUKI Source + android-kernel-tools (compiler node)
+      - name: Clone NUKI Source + android-kernel-tools
         run: |
           BRANCH="${{ inputs.kernel_branch }}"
           [ -z "$BRANCH" ] && BRANCH="android-14-release-u1tgns34.42-86-2-32"
           echo "Cloning kernel source $BRANCH"
           git clone --depth=1 -b "$BRANCH" https://github.com/015stray91/kernel-msm-1.git kernel-source
-          rm -rf kernel-source/tools/toolchains/snapdragon-toolchain
-          echo "Cloning android-kernel-tools (compiler node)"
-          git clone --depth=1 https://github.com/015stray91/android-kernel-tools.git compiler-node
-          echo "=== Toolchain structure ==="
-          ls compiler-node/clang/host/linux-x86/ && ls compiler-node/gcc/linux-x86/aarch64/
-          echo "=== Makefile HOSTCC ==="
-          grep -A2 "^HOSTCC" kernel-source/Makefile | head -4
+          # DO NOT nuke snapdragon-toolchain - it is the in-tree Clang 12 (inner compiler)
+          echo "=== In-tree toolchain preserved ==="
+          ls kernel-source/tools/toolchains/snapdragon-toolchain/
+          echo "=== Kotoamatsukami outer wrapper probe (local only) ==="
+          [ -d /home/slm015/compiler-node/fetched/Kotoamatsukami ] && \
+            ls /home/slm015/compiler-node/fetched/Kotoamatsukami/bin/build/Kotoamatsukami.so || \
+            echo "Kotoamatsukami.so: source-only (built locally)"
 
-      - name: Set up toolchain + kernel config (android-kernel-tools way)
+      - name: NUKI Colonel staged merge (8-file A->Z chain, base sacred, ending final)
         run: |
           cd kernel-source
-          # Install toolchain into kernel-source/tools/toolchains/snapdragon-toolchain
-          mkdir -p tools/toolchains/snapdragon-toolchain
-          mkdir -p tools/toolchains/snapdragon-toolchain/gcc/linux-x86/aarch64
-          cp -r ../compiler-node/clang/host/linux-x86/clang-r416183b tools/toolchains/snapdragon-toolchain/
-          cp -r ../compiler-node/gcc/linux-x86/aarch64/gcc-linaro-7.5.0 tools/toolchains/snapdragon-toolchain/gcc/linux-x86/aarch64/
-          rm -rf ../compiler-node
-          echo "=== llvm-ar: ==="; ls -l tools/toolchains/snapdragon-toolchain/clang-r416183b/bin/llvm-ar
-          echo "=== aarch64-gcc: ==="; ls -l tools/toolchains/snapdragon-toolchain/gcc/linux-x86/aarch64/gcc-linaro-7.5.0/bin/aarch64-linux-gnu-gcc
-          echo "=== 4 curated configs ==="
-          wc -l arch/arm64/configs/ksu-nh.defconfig \
-                 arch/arm64/configs/vendor/moto-parrot-sm6450.config \
-                 arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config \
-                 arch/arm64/configs/nurfs-linux.fragment
+          # Mirror build.config.anyrealm.kernel DEFCONFIG chain (lines 55-64)
+          # Base: ksu-nh.defconfig (sacred Colonel)
+          # Middle: consolidate.fragment, defconfig.fragment,
+          #         vendor/moto-parrot-sm6450.config, vendor/ext_config/debug-parrot-genevn.config
+          # Ending: vendor/ext_config/debug_moto_parrot_genevn.config, nurfs-linux.fragment
+          python3 scripts/kconfig/merge_nuki.py \
+            --base arch/arm64/configs/ksu-nh.defconfig \
+            --middle \
+              arch/arm64/configs/consolidate.fragment \
+              arch/arm64/configs/defconfig.fragment \
+              arch/arm64/configs/vendor/moto-parrot-sm6450.config \
+              arch/arm64/configs/vendor/ext_config/debug-parrot-genevn.config \
+            --ending \
+              arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config \
+              arch/arm64/configs/nurfs-linux.fragment \
+            -o out/.config
 
-          mkdir -p out
-          # A→Z cumulative merge: 4 curated files only
+          # Initialize Kconfig symbols (yes '' answers n to new prompts on no-tty)
+          yes "" | make O=out ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CC=clang HOSTCC=gcc LLVM=-12 LLVM_IAS=-12 \
+            olddefconfig 2>&1 | tail -5
+
+          # Re-emit final cumulative .config after olddefconfig fills missing symbols
           python3 scripts/kconfig/merge_nuki.py \
             --base arch/arm64/configs/ksu-nh.defconfig \
-            --middle arch/arm64/configs/vendor/moto-parrot-sm6450.config \
-            --ending arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config arch/arm64/configs/nurfs-linux.fragment \
+            --middle \
+              arch/arm64/configs/consolidate.fragment \
+              arch/arm64/configs/defconfig.fragment \
+              arch/arm64/configs/vendor/moto-parrot-sm6450.config \
+              arch/arm64/configs/vendor/ext_config/debug-parrot-genevn.config \
+            --ending \
+              arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config \
+              arch/arm64/configs/nurfs-linux.fragment \
             -o out/.config
-          make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang HOSTCC=gcc LLVM=-12 LLVM_IAS=-12 alldefconfig 2>&1 | tail -3
-          python3 scripts/kconfig/merge_nuki.py \
-            --base arch/arm64/configs/ksu-nh.defconfig \
-            --middle arch/arm64/configs/vendor/moto-parrot-sm6450.config \
-            --ending arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config arch/arm64/configs/nurfs-linux.fragment \
-            -o out/.config
-          make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang HOSTCC=gcc LLVM=-12 LLVM_IAS=-12 silentoldconfig 2>&1 | tail -3
-          python3 scripts/kconfig/merge_nuki.py \
-            --base arch/arm64/configs/ksu-nh.defconfig \
-            --middle arch/arm64/configs/vendor/moto-parrot-sm6450.config \
-            --ending arch/arm64/configs/vendor/ext_config/debug_moto_parrot_genevn.config arch/arm64/configs/nurfs-linux.fragment \
-            -o out/.config
+
+          # LZ4 NEON deployment (kernel Colonel compression, from deploy_lz4.sh)
+          [ -f deploy_lz4.sh ] && chmod +x deploy_lz4.sh && ./deploy_lz4.sh || echo "no deploy_lz4.sh"
+
           echo "=== Final .config: $(grep -c '^CONFIG_' out/.config) CONFIGs ==="
-          for f in CONFIG_KSU CONFIG_KSU_SUSFS CONFIG_ZEROMOUNT CONFIG_OVERLAY_FS CONFIG_FUSE_FS CONFIG_ZRAM CONFIG_KALLSYMS CONFIG_MODULES CONFIG_ARM64 CONFIG_QCOM_EUD CONFIG_KPM; do
+          for f in CONFIG_KSU CONFIG_KSU_SUSFS CONFIG_KSU_SUSFS_SUS_MOUNT CONFIG_KSU_SUSFS_HARDENED \
+                   CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS CONFIG_ZEROMOUNT CONFIG_OVERLAY_FS \
+                   CONFIG_FUSE_FS CONFIG_ZRAM CONFIG_ZSMALLOC CONFIG_ZCOMP_LZ4K \
+                   CONFIG_KALLSYMS CONFIG_MODULES CONFIG_MODVERSIONS CONFIG_MODULE_UNLOAD \
+                   CONFIG_ARM64 CONFIG_QCOM_EUD CONFIG_KPM CONFIG_HIDELKM \
+                   CONFIG_BINFMT_MISC CONFIG_FUTEX2 CONFIG_FTRACE CONFIG_FUNCTION_TRACER \
+                   CONFIG_KERNEL_LZ4; do
             grep -q "^${f}=y" out/.config && echo " PASS $f" || echo " FAIL $f"
           done
 
-      - name: Compile NUKI
+      - name: Run Free Tier Gold-Platinum Hybrid Engine (analyze build.log, no edits)
+        env:
+          # --- API Routing Core (masked by GitHub Actions, scanner-safe) ---
+          LLM_PROVIDER: "openrouter"
+          LLM_BASE_URL: "https://openrouter.ai"
+          LLM_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+
+          # --- OPENCODE: GOLD STANDARD (free tier structural master) ---
+          # Qwen 2.5 Coder 32B is heavily trained on core C repositories, Kconfigs, Makefiles
+          PRIMARY_ORCHESTRATOR_MODEL: "openrouter/qwen/qwen-2.5-coder-32b-instruct:free"
+
+          # --- OPENHANDS: PLATINUM STANDARD (free tier reasoning / execution) ---
+          # DeepSeek Chat parses dense log traces, breaks down root-cause errors, plans patches
+          SUB_AGENT_EXECUTION_MODEL: "openrouter/deepseek/deepseek-chat:free"
+
+          # --- SYSTEM UPGRADE LOGIC (NUKI Colonel non-negotiable contracts) ---
+          LLM_SYSTEM_PROMPT: |
+            You are the Unified Gold-Platinum Hybrid Node running on NUKI Colonel
+            (Native Unified Kernel Image, decoupled non-GKI architecture).
+
+            HIERARCHY DEPLOYMENT:
+            1. OpenCode (Gold Standard) is the strategic supervisor. You trace the
+               8-file A->Z DEFCONFIG chain in build.config.anyrealm.kernel
+               (ksu-nh.defconfig -> consolidate -> defconfig -> moto-parrot-sm6450
+               -> debug-parrot-genevn -> debug_moto_parrot_genevn -> nurfs-linux).
+            2. When a step stalls or fails, OpenCode isolates the failure to either
+               (a) CONFIG_ missing from a curated file, or (b) toolchain version
+               mismatch (must be Clang 12 inner, Clang 17 outer wrapper, LLD 12).
+            3. OpenHands (Platinum) executes the patch.
+
+            CRITICAL ROADBLOCK PROTOCOLS:
+            - NEVER fallback to Google GKI 2.0 structures, compliance checks, or
+              build_*.config.* files outside the 8-file Colonel chain.
+            - The fused ksu-nh.defconfig is ABSOLUTE LAW. Do not rewrite adjacent
+              files. Do not delete files. Do not touch fs/koto/, vendor/, or
+              scripts/kconfig/merge_nuki.py.
+            - Restrict OpenHands to 3 terminal iterations per task.
+            - Kotoamatsukami (LLVM 17 obfuscator) is an OUTER WRAPPER for select
+              passes; the kernel inner compile ALWAYS uses Clang 12 from
+              tools/toolchains/snapdragon-toolchain/clang-r416183b/bin/clang.
+            - gcc-linaro-7.5.0 is for NetHunter parts only; never substitute it
+              for the kernel cross-compiler.
+        run: |
+          # Read-only analysis pass on the build log - no source mutations
+          openhands run --workspace-dir ./ --model "$PRIMARY_ORCHESTRATOR_MODEL" \
+            --sub-agent-model "$SUB_AGENT_EXECUTION_MODEL" \
+            --task "Analyze any pre-existing build.log or .config. Report (a) which
+                    CONFIG_ keys are missing from the 8-file NUKI Colonel chain,
+                    (b) whether the inner compiler is Clang 12 from
+                    tools/toolchains/snapdragon-toolchain/clang-r416183b, and
+                    (c) whether the outer Clang 17 wrapper is wired correctly. Do
+                    not modify any source file. Output a single short report." \
+            2>&1 | tee openhands-engine.log || true
+
+      - name: Compile NUKI Colonel (Image.lz4 + modules)
         run: |
           cd kernel-source
-          # yes '' answers 'n' (default) to all NEW Kconfig prompts in case
-          # olddefconfig/syncconfig triggers them (no tty on GH Actions)
-          yes "" | make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+          # Mirror build.config.anyrealm.kernel MAKE_GOALS exactly:
+          #   Image.lz4 + modules, Clang 12 inner, LLVM=1, LLVM_IAS=1
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export LLVM=1
+          export LLVM_IAS=1
+          export CC=clang
+          export LD=ld.lld
+          export AR=llvm-ar
+          export NM=llvm-nm
+          export OBJCOPY=llvm-objcopy
+          export OBJDUMP=llvm-objdump
+          export STRIP=llvm-strip
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+
+          # yes '' answers 'n' (default) to all NEW Kconfig prompts on no-tty
+          yes "" | make O=out ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CC=clang LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- \
+            LLVM=-12 LLVM_IAS=-12 \
             -j$(nproc --all) Image.lz4 modules 2>&1 | tee ../build.log
+
           ls -lh out/arch/arm64/boot/Image.lz4 || (echo "FAIL"; tail -100 ../build.log; exit 1)
           mkdir -p ../modules
           find out -name "*.ko" -exec cp {} ../modules/ \;
           ls -lh ../modules/*.ko 2>/dev/null | head -10 || echo "no .ko modules"
 
-      - name: Upload NUKI
+      - name: Upload NUKI Colonel
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: AnyRealm-NUKI-Genevn-${{ github.run_number }}
+          name: AnyRealm-NUKI-Colonel-Genevn-${{ github.run_number }}
           path: |
             kernel-source/out/arch/arm64/boot/Image.lz4
             kernel-source/out/arch/arm64/boot/Image
