@@ -103,7 +103,7 @@ jobs:
           chmod +x deploy_lz4.sh nethunter_hook.sh
           ./deploy_lz4.sh || true
 
-      - name: Merge NUKI Config (cumulative: kernel defconfig -> curated -> NURFS, no flag lost)
+      - name: "Merge NUKI Config (kernel defconfig -> curated -> NURFS, cumulative)"
         run: |
           cd kernel-source
           mkdir -p out
