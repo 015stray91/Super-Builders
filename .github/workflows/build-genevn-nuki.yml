@@ -56,6 +56,24 @@ jobs:
             ls /home/slm015/compiler-node/fetched/Kotoamatsukami/bin/build/Kotoamatsukami.so || \
             echo "Kotoamatsukami.so: source-only (built locally)"
 
+      - name: Patch KVM nvhe Makefile (fix MODVERSIONS + fPIC conflict)
+        run: |
+          # CONFIG_MODVERSIONS generates __kvm_nvhe___crc_* absolute symbols.
+          # The KVM nvhe hypervisor code is compiled -fPIC and cannot use
+          # absolute 32-bit relocations. Remove CRC generation for nvhe objects.
+          M=kernel-source/arch/arm64/kvm/hyp/nvhe/Makefile
+          if ! grep -q "CFLAGS_REMOVE_page.nvhe.o.*KCRCTAB" "$M"; then
+            echo >> "$M"
+            echo "# Prevent MODVERSIONS CRCs from breaking KVM nvhe -fPIC binary" >> "$M"
+            echo "CFLAGS_REMOVE_page.nvhe.o     := \$(filter-out \$(KCRCTAB), \$(CFLAGS))" >> "$M"
+            echo "CFLAGS_REMOVE_memcpy.nvhe.o   := \$(filter-out \$(KCRCTAB), \$(CFLAGS))" >> "$M"
+            echo "CFLAGS_REMOVE_memset.nvhe.o   := \$(filter-out \$(KCRCTAB), \$(CFLAGS))" >> "$M"
+            echo "=== KVM nvhe MODVERSIONS fix applied ==="
+            tail -5 "$M"
+          else
+            echo "KVM nvhe MODVERSIONS fix already present"
+          fi
+
       - name: Patch Header Stubs (fix duplicate-symbol linker errors)
         run: |
           # Fix include/linux/usb/dwc3-msm.h #else stubs missing 'static':
@@ -101,13 +119,14 @@ jobs:
       - name: Apply Build Helpers (bypass ABI, fix compat, apply KSU seal patches)
         run: |
           cd kernel-source
-          # In CI, Super-Builders is the workspace root. From kernel-source/,
-          # the paths are:
-          #   android12-5.10/KernelSU-Next/build-helpers/
-          #   android12-5.10/KernelSU-Next/patches/    (NOTE: 'patches', not 'Ksu-patches')
+          # In CI, the Super-Builders repo is checked out at $GITHUB_WORKSPACE/super-builders
+          # (a subdirectory named 'super-builders' under the default workflow name).
+          # So from kernel-source/, paths are:
+          #   ../../android12-5.10/build-helpers/
+          #   ../../android12-5.10/KernelSU-Next/patches/    (NOTE: 'patches', not 'Ksu-patches')
           # NUKI Colonel is android12 (5.10.233) per device's last A12 update.
-          HELPER="../android12-5.10/build-helpers"
-          KSU_PATCHES="../android12-5.10/KernelSU-Next/patches"
+          HELPER="../../android12-5.10/build-helpers"
+          KSU_PATCHES="../../android12-5.10/KernelSU-Next/patches"
           SUBLEVEL=$(grep "^SUBLEVEL =" Makefile | head -1 | awk '{print $3}')
 
           # 1) bypass-oem-abi: strips GKI protected_exports, disables TRIM in gki_defconfig
