@@ -65,22 +65,22 @@ jobs:
           KSU_REPO="https://github.com/KernelSU-Next/KernelSU-Next.git"
           echo "=== Cloning KernelSU-Next @ $KSU_PIN ==="
           git clone --filter=blob:none --no-checkout "$KSU_REPO" /tmp/ksu-source
-          cd /tmp/ksu-source && git fetch --depth=1 origin "$KSU_PIN" && git checkout FETCH_HEAD
+          (cd /tmp/ksu-source && git fetch --depth=1 origin "$KSU_PIN" && git checkout FETCH_HEAD)
           echo "=== KernelSU-Next contents ==="
           ls /tmp/ksu-source/kernel/
-          echo "=== Copying kernel/KernelSU/ into kernel-source ==="
-          cp -r /tmp/ksu-source/kernel kernel-source/kernel/KernelSU
+          echo "=== Copying kernel/ into kernel-source/kernel/KernelSU ==="
+          mkdir -p kernel-source/kernel/KernelSU
+          cp -r /tmp/ksu-source/kernel/. kernel-source/kernel/KernelSU/
+          echo "=== Removing duplicate Makefile (use kernel-source build) ==="
+          rm -f kernel-source/kernel/KernelSU/Makefile
           echo "=== Adding obj-y += KernelSU/ to kernel/Makefile ==="
           if ! grep -q "obj-y.*+=.*KernelSU" kernel-source/kernel/Makefile; then
             echo "obj-y += KernelSU/" >> kernel-source/kernel/Makefile
           fi
-          echo "=== Removing GKI stub files from KernelSU (not needed for GKI) ==="
-          rm -f kernel-source/kernel/KernelSU/Makefile
           echo "=== Verify KernelSU source is present ==="
           ls kernel-source/kernel/KernelSU/
           echo "=== Verifying KSU hooks are defined ==="
-          grep -r "ksu_handle_setresuid\|ksu_su_compat_enabled" kernel-source/kernel/KernelSU/feature/ 2>/dev/null | head -5 || \
-            grep -r "ksu_handle_setresuid\|ksu_su_compat_enabled" kernel-source/kernel/KernelSU/ 2>/dev/null | head -5
+          grep -rl "ksu_handle_setresuid\|ksu_su_compat_enabled" kernel-source/kernel/KernelSU/ 2>/dev/null | head -5
 
       - name: Patch KVM nvhe Makefile (fix MODVERSIONS + fPIC conflict)
         run: |
