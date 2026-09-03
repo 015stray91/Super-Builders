@@ -222,6 +222,18 @@ jobs:
           # 'ddr_freq_update' bool - linker fails with duplicate symbol. Disable the
           # SUBSYSTEM variant (SOC variant is the primary one for SM6450).
           sed -i 's/^CONFIG_QCOM_SUBSYSTEM_SLEEP_STATS=y/# CONFIG_QCOM_SUBSYSTEM_SLEEP_STATS is not set/' out/.config
+          # USB_DWC3_MSM: when disabled, dwc3-msm.h's #else stubs (msm_ep_update_ops,
+          # dwc3_msm_notify_event, etc.) lack 'static' — both phy-msm-ssusb-qmp.o and
+          # phy-msm-snps-hs.o define them as extern, causing duplicate-symbol linker error.
+          # Enable the real driver so the stub path is skipped.
+          grep -q "^# CONFIG_USB_DWC3_MSM is not set" out/.config && \
+            sed -i 's/^# CONFIG_USB_DWC3_MSM is not set/CONFIG_USB_DWC3_MSM=y/' out/.config || true
+          # Same root cause: qcom_common.h's #else stub for CONFIG_QCOM_SYSMON
+          # defines a non-static qcom_sysmon_get_reason. Every file including
+          # the header (pdr_interface, qcom_common, qcom_q6v5*, esoc*) re-emits
+          # it. Enable QCOM_SYSMON so the header uses the extern path instead.
+          grep -q "^# CONFIG_QCOM_SYSMON is not set" out/.config && \
+            sed -i 's/^# CONFIG_QCOM_SYSMON is not set/CONFIG_QCOM_SYSMON=y/' out/.config || true
           # Ensure QCOM_SMEM and SCHED_WALT are enabled (fixes source-level dependencies)
           grep -q "^# CONFIG_QCOM_SMEM is not set" out/.config && \
             sed -i 's/^# CONFIG_QCOM_SMEM is not set/CONFIG_QCOM_SMEM=y/' out/.config || true
