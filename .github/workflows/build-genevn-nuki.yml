@@ -177,13 +177,13 @@ jobs:
           sed -i 's/^CONFIG_LTO_CLANG_FULL=y/# CONFIG_LTO_CLANG_FULL is not set/' out/.config
           sed -i 's/^CONFIG_LTO_CLANG_THIN=y/# CONFIG_LTO_CLANG_THIN is not set/' out/.config
           sed -i 's/^CONFIG_KERNEL_MODE_NEON=y/# CONFIG_KERNEL_MODE_NEON is not set/' out/.config
-          # Disable squashfs entirely - both FILE_CACHE and FILE_DIRECT define squashfs_readpage_block
-          # causing duplicate symbol link errors. NUKI/NURFS doesn't need squashfs.
-          # squashfs_fs.h uses '#define SQUASHFS_CACHED_FRAGMENTS CONFIG_SQUASHFS_FRAGMENT_CACHE_SIZE'
-          # so we MUST set the value (not comment it out), otherwise super.c gets undefined identifier.
+          # Disable squashfs sub-features that cause duplicate symbols.
+          # squashfs_fs.h line 13: '#define SQUASHFS_CACHED_FRAGMENTS CONFIG_SQUASHFS_FRAGMENT_CACHE_SIZE'
+          # is used unconditionally in super.c line 273. Since we can't 'scripts/config -d CONFIG_SQUASHFS'
+          # (depends-on chain breaks elsewhere), just disable sub-features AND patch squashfs_fs.h
+          # to remove the problematic define so super.c compiles.
           if [ -f scripts/config ]; then
             scripts/config --file out/.config \
-              --set-val CONFIG_SQUASHFS_FRAGMENT_CACHE_SIZE 1 \
               -d CONFIG_SQUASHFS_FILE_CACHE \
               -d CONFIG_SQUASHFS_FILE_DIRECT \
               -d CONFIG_SQUASHFS_DECOMP_SINGLE \
@@ -197,7 +197,10 @@ jobs:
               -d CONFIG_SQUASHFS_XATTR \
               -d CONFIG_SQUASHFS_POSIX_ACL || true
           fi
-          sed -i 's/^CONFIG_SQUASHFS=y/# CONFIG_SQUASHFS is not set/' out/.config || true
+          # Also disable squashfs itself but keep CONFIG_SQUASHFS defined (for fragment_cache_size)
+          # and patch squashfs_fs.h to remove the problematic define used by super.c
+          sed -i 's/^#define SQUASHFS_CACHED_FRAGMENTS.*$/\/\* SQUASHFS disabled by NUKI \*//' \
+            fs/squashfs/squashfs_fs.h 2>/dev/null || true
           # CIFS_SMBD conflicts with cifs_listxattr (cifsfs.h #define cifs_listxattr NULL
           # when SMBD is on, then xattr.c redefines function = syntax error)
           sed -i 's/^CONFIG_CIFS_SMBD=y/# CONFIG_CIFS_SMBD is not set/' out/.config
