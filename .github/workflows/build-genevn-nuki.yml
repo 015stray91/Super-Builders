@@ -82,10 +82,10 @@ jobs:
           cd kernel-source
           # In CI, Super-Builders is the workspace root. From kernel-source/,
           # the paths are:
-          #   super-builders/android12-5.10/KernelSU-Next/build-helpers/
-          #   super-builders/android12-5.10/KernelSU-Next/patches/    (NOTE: 'patches', not 'Ksu-patches')
-          HELPER="../super-builders/android12-5.10/KernelSU-Next/build-helpers"
-          KSU_PATCHES="../super-builders/android12-5.10/KernelSU-Next/patches"
+          #   android14-6.1/KernelSU-Next/build-helpers/
+          #   android14-6.1/KernelSU-Next/patches/    (NOTE: 'patches', not 'Ksu-patches')
+          HELPER="../android14-6.1/KernelSU-Next/build-helpers"
+          KSU_PATCHES="../android14-6.1/KernelSU-Next/patches"
           SUBLEVEL=$(grep "^SUBLEVEL =" Makefile | head -1 | awk '{print $3}')
 
           # 1) bypass-oem-abi: strips GKI protected_exports, disables TRIM in gki_defconfig
@@ -214,6 +214,10 @@ jobs:
           if ! grep -q "^# CONFIG_CIFS is not set" out/.config; then
             sed -i 's/^# CONFIG_CIFS is not set/# CONFIG_CIFS is not set\n# CONFIG_CIFS_XATTR is not set/' out/.config
           fi
+          # QCOM_SUBSYSTEM_SLEEP_STATS and QCOM_SOC_SLEEP_STATS both define global
+          # 'ddr_freq_update' bool - linker fails with duplicate symbol. Disable the
+          # SUBSYSTEM variant (SOC variant is the primary one for SM6450).
+          sed -i 's/^CONFIG_QCOM_SUBSYSTEM_SLEEP_STATS=y/# CONFIG_QCOM_SUBSYSTEM_SLEEP_STATS is not set/' out/.config
           # Ensure QCOM_SMEM and SCHED_WALT are enabled (fixes source-level dependencies)
           grep -q "^# CONFIG_QCOM_SMEM is not set" out/.config && \
             sed -i 's/^# CONFIG_QCOM_SMEM is not set/CONFIG_QCOM_SMEM=y/' out/.config || true
