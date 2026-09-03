@@ -210,7 +210,10 @@ jobs:
           export LLVM=1
           export LLVM_IAS=1
           export CC=clang
-          export LD=ld.lld
+          export LD=aarch64-linux-gnu-ld
+          # GNU ld (binutils) is required for KVM nVHE partial link (-r -T linker-script).
+          # ld.lld cannot handle the hyp nvhe .o partial link with linker script.
+          # aarch64-linux-gnu-ld works for both partial link (nvhe) and final vmlinux.
           export AR=llvm-ar
           export NM=llvm-nm
           export OBJCOPY=llvm-objcopy
@@ -360,13 +363,13 @@ jobs:
            # the env exports above (LLVM=1, LLVM_IAS=1) - do NOT clobber them.
            yes '' | make O=out ARCH=arm64 \
              CROSS_COMPILE=aarch64-linux-gnu- \
-             CC=clang LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- \
+              CC=clang LD=aarch64-linux-gnu-ld CLANG_TRIPLE=aarch64-linux-gnu- \
              olddefconfig 2>&1 | tail -5
 
            # Now build with the fully-resolved config
            make O=out ARCH=arm64 \
              CROSS_COMPILE=aarch64-linux-gnu- \
-             CC=clang LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- \
+              CC=clang LD=aarch64-linux-gnu-ld CLANG_TRIPLE=aarch64-linux-gnu- \
              -j$(nproc --all) Image.lz4 modules 2>&1 | tee ../build.log
 
           ls -lh out/arch/arm64/boot/Image.lz4 || (echo "FAIL"; tail -100 ../build.log; exit 1)
