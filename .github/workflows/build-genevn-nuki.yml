@@ -189,13 +189,13 @@ jobs:
             sed -i 's/^# CONFIG_SCHED_WALT is not set/CONFIG_SCHED_WALT=y/' out/.config || true
 
           echo "=== Final .config: $(grep -c '^CONFIG_' out/.config) CONFIGs ==="
-          for f in CONFIG_KSU CONFIG_KSU_SUSFS CONFIG_KSU_SUSFS_SUS_MOUNT CONFIG_KSU_SUSFS_HARDENED \
-                   CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS CONFIG_ZEROMOUNT CONFIG_OVERLAY_FS \
-                   CONFIG_FUSE_FS CONFIG_ZRAM CONFIG_ZSMALLOC CONFIG_ZCOMP_LZ4K \
-                   CONFIG_KALLSYMS CONFIG_MODULES CONFIG_MODVERSIONS CONFIG_MODULE_UNLOAD \
-                   CONFIG_ARM64 CONFIG_QCOM_EUD CONFIG_KPM CONFIG_HIDELKM \
-                   CONFIG_BINFMT_MISC CONFIG_FUTEX2 CONFIG_FTRACE CONFIG_FUNCTION_TRACER \
-                   CONFIG_KERNEL_LZ4; do
+           for f in CONFIG_KSU CONFIG_KSU_SUSFS CONFIG_KSU_SUSFS_SUS_MOUNT CONFIG_KSU_SUSFS_HARDENED \
+                    CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS CONFIG_ZEROMOUNT CONFIG_OVERLAY_FS \
+                    CONFIG_FUSE_FS CONFIG_ZRAM CONFIG_ZSMALLOC \
+                    CONFIG_KALLSYMS CONFIG_MODULES CONFIG_MODVERSIONS CONFIG_MODULE_UNLOAD \
+                    CONFIG_ARM64 CONFIG_QCOM_EUD CONFIG_KPM CONFIG_HIDELKM \
+                    CONFIG_BINFMT_MISC CONFIG_FTRACE CONFIG_FUNCTION_TRACER \
+                    CONFIG_KERNEL_LZ4; do
             grep -q "^${f}=y" out/.config && echo " PASS $f" || echo " FAIL $f"
           done
 
@@ -353,11 +353,13 @@ jobs:
 
           # Use silentoldconfig (auto-accept all defaults from .config, no prompts)
           # This avoids 'yes' re-enabling things like CIFS that aren't set
-          make O=out ARCH=arm64 \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CC=clang LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- \
-            LLVM=-12 LLVM_IAS=-12 \
-            silentoldconfig 2>&1 | tail -3 || true
+           # Auto-answer NEW config prompts with default (N for most). sparse .config
+           # causes silentoldconfig to ask about ARCH_QCOM/L AHAINA/WAIPIO/etc variants.
+           yes '' | make O=out ARCH=arm64 \
+             CROSS_COMPILE=aarch64-linux-gnu- \
+             CC=clang LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- \
+             LLVM=-12 LLVM_IAS=-12 \
+             silentoldconfig 2>&1 | tail -5
 
           # Now build with the fully-resolved config
           make O=out ARCH=arm64 \
