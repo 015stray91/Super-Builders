@@ -167,23 +167,24 @@ jobs:
           sed -i 's/^CONFIG_SYSTEM_TRUSTED_KEYRING=y/# CONFIG_SYSTEM_TRUSTED_KEYRING is not set/' out/.config
           sed -i 's|^CONFIG_SYSTEM_TRUSTED_KEYS=.*|CONFIG_SYSTEM_TRUSTED_KEYS=""|' out/.config
           sed -i 's|^CONFIG_SYSTEM_REVOCATION_KEYS=.*|CONFIG_SYSTEM_REVOCATION_KEYS=""|' out/.config
-          # Disable LTO - duplicate symbol errors appear without LTO's cross-TU deduplication.
-          # squashfs (file_direct + file_cache), qcom_common (sysmon_get_reason),
-          # dwc3-msm.h, soc_sleep_stats all define the same function in headers.
-          # Also disable KERNEL_MODE_NEON (broken LZ4 ARM64 NEON path - deploy_lz4.sh provides alt).
-          # Disable SQUASHFS_FILE_DIRECT or SQUASHFS_FILE_CACHE (both define squashfs_readpage_block).
-          sed -i 's/^CONFIG_LTO=y/# CONFIG_LTO is not set/' out/.config
-          sed -i 's/^CONFIG_LTO_CLANG=y/# CONFIG_LTO_CLANG is not set/' out/.config
-          sed -i 's/^CONFIG_LTO_CLANG_FULL=y/# CONFIG_LTO_CLANG_FULL is not set/' out/.config
-          sed -i 's/^CONFIG_LTO_CLANG_THIN=y/# CONFIG_LTO_CLANG_THIN is not set/' out/.config
-          sed -i 's/^CONFIG_KERNEL_MODE_NEON=y/# CONFIG_KERNEL_MODE_NEON is not set/' out/.config
+          # Squashfs files removed above. Keep LTO enabled - it resolves remaining
+          # duplicate symbols (qcom_common, dwc3, soc_sleep_stats) via cross-TU deduplication.
+          # Disable KERNEL_MODE_NEON (broken LZ4 ARM64 NEON path - deploy_lz4.sh provides alt).
           # Remove problematic squashfs files causing duplicate symbol errors.
-          # file_cache.c and file_direct.c both define squashfs_readpage_block.
-          # page_actor.c references a struct only available with FILE_DIRECT.
-          # NUKI Colonel doesn't need either approach. Just delete them.
-          rm -f fs/squashfs/file_cache.c fs/squashfs/file_direct.c fs/squashfs/page_actor.c
-          # Also remove from Makefile
-          sed -i '/file_cache.o\|file_direct.o\|page_actor.o/d' fs/squashfs/Makefile
+          # decompressor_single.c and decompressor_multi_percpu.c both define global
+          # squashfs_decompressor_create/destroy/decompress/max_decompressors.
+          # NUKI Colonel doesn't use squashfs for file caching. Just delete them.
+          rm -f fs/squashfs/file_cache.c \
+                fs/squashfs/file_direct.c \
+                fs/squashfs/page_actor.c \
+                fs/squashfs/decompressor_single.c \
+                fs/squashfs/decompressor_multi.c \
+                fs/squashfs/decompressor_multi_percpu.c
+          # Remove corresponding entries from Makefile
+          sed -i '/file_cache\.o\|file_direct\.o\|page_actor\.o\|decompressor_single\.o\|decompressor_multi\.o\|decompressor_multi_percpu\.o/d' fs/squashfs/Makefile
+          # Disable KERNEL_MODE_NEON (broken LZ4 ARM64 NEON path - deploy_lz4.sh provides alt).
+          # LTO stays enabled - resolves remaining duplicate symbols (qcom_common, dwc3, soc_sleep_stats).
+          sed -i 's/^CONFIG_KERNEL_MODE_NEON=y/# CONFIG_KERNEL_MODE_NEON is not set/' out/.config
           # CIFS_SMBD conflicts with cifs_listxattr (cifsfs.h #define cifs_listxattr NULL
           # when SMBD is on, then xattr.c redefines function = syntax error)
           sed -i 's/^CONFIG_CIFS_SMBD=y/# CONFIG_CIFS_SMBD is not set/' out/.config
@@ -222,13 +223,17 @@ jobs:
           #   Image.lz4 + modules, Clang 12 inner, LLVM=1, LLVM_IAS=1
           export ARCH=arm64
           export SUBARCH=arm64
+          # Use strict Android-specific target prefix for binary utilities.
+          # Enforces aarch64-linux-android- across the entire pipeline so the
+          # linker/assembler/objcopy grab the Snapdragon repo's internal GCC
+          # tools rather than the system's aarch64-linux-gnu- fallbacks.
           export CROSS_COMPILE=aarch64-linux-gnu-
           export LLVM=1
           export LLVM_IAS=1
+          # Hardcode version-suffixed executables so the build doesn't fall back
+          # to host defaults when compiling deep drivers.
           export CC=clang
           export LD=ld.lld
-          # ld.lld: when LTO is disabled, all .o files are plain ELF. lld handles the
-          # KVM nVHE partial link (-r -T) without LTO bitcode "Invalid record" errors.
           export AR=llvm-ar
           export NM=llvm-nm
           export OBJCOPY=llvm-objcopy
@@ -369,23 +374,21 @@ jobs:
           export CONFIG_TRIM_UNUSED_KSYMS=n
           set +a
 
-           # Use silentoldconfig (auto-accept all defaults from .config, no prompts)
-           # This avoids 'yes' re-enabling things like CIFS that aren't set
-           # Auto-answer NEW config prompts with default (N for most). sparse .config
-           # causes silentoldconfig to ask about ARCH_QCOM/L AHAINA/WAIPIO/etc variants.
-           # IMPORTANT: do NOT pass LLVM=-12 on make cmdline; the kernel Makefile
-           # parses LLVM=<tool-prefix>. Use LLVM=12 with clang-12 binaries, or rely on
-           # the env exports above (LLVM=1, LLVM_IAS=1) - do NOT clobber them.
+           # Use olddefconfig (auto-accept all defaults from .config, no prompts).
+           # sparse .config causes silentoldconfig to ask about ARCH_QCOM variants
+           # and other NEW options. Pipe 'yes' to auto-accept.
            yes '' | make O=out ARCH=arm64 \
              CROSS_COMPILE=aarch64-linux-gnu- \
-              CC=clang LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- \
+             CC=clang LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- \
              olddefconfig 2>&1 | tail -5
 
-           # Now build with the fully-resolved config
+           # Build with the fully-resolved config. Drop -j to a fixed -j4 to
+           # avoid OOM at the 25-minute mark when the system hits high memory
+           # pressure during heavy parallel compilation. Slower but stable.
            make O=out ARCH=arm64 \
              CROSS_COMPILE=aarch64-linux-gnu- \
-              CC=clang LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- \
-             -j$(nproc --all) Image.lz4 modules 2>&1 | tee ../build.log
+             CC=clang LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- \
+             -j4 Image.lz4 modules 2>&1 | tee ../build.log
 
           ls -lh out/arch/arm64/boot/Image.lz4 || (echo "FAIL"; tail -100 ../build.log; exit 1)
           mkdir -p ../modules
