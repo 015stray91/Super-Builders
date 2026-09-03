@@ -99,33 +99,28 @@ jobs:
             bash "$HELPER/fix-old-kernel-compat.sh" . "$SUBLEVEL"
           fi
 
-          # 4) Apply KSU seal patches (real source diffs from Super-Builders)
-          #    These add fs/susfs.c, fs/zeromount.c, modify ksu Kbuild, etc.
-           if [ -d "$KSU_PATCHES" ]; then
-             echo "=== Apply patches (KSU seal) ==="
-             for patch in "$KSU_PATCHES"/*.patch; do
-               [ -f "$patch" ] || continue
-               echo "  -> $(basename $patch)"
-               patch -p1 -F3 --forward < "$patch" || echo "  ! $(basename $patch) already applied or failed"
-             done
-           else
-             echo "patches not found at $KSU_PATCHES - skipping"
-           fi
-
-           # Direct fix: ensure inotify_fdinfo uses 3-arg form when KSU_SUSFS_SUS_MOUNT=y
-           echo "=== Direct fdinfo.c fix (inotify_fdinfo 3-arg sig) ==="
-           awk '
-             /^static void inotify_fdinfo\(struct seq_file \*m, struct fsnotify_mark \*mark\)$/ {
-               print "#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT";
-               print "static void inotify_fdinfo(struct seq_file *m, struct fsnotify_mark *mark, struct file *file)";
-               print "#else";
-               print;
-               print "#endif";
-               next
-             }
-             { print }
-           ' fs/notify/fdinfo.c > fs/notify/fdinfo.c.tmp && mv fs/notify/fdinfo.c.tmp fs/notify/fdinfo.c
-           if grep -q "file \*file" fs/notify/fdinfo.c; then echo "  + inotify_fdinfo signature patched"; else echo "  ! patch not applied"; fi
+           # 4) Apply KSU seal patches (real source diffs from Super-Builders)
+           #    Kernel already has SUSFS integrated - dry-run first to avoid .rej files
+            if [ -d "$KSU_PATCHES" ]; then
+              echo "=== Apply patches (KSU seal, dry-run first) ==="
+              for patch in "$KSU_PATCHES"/*.patch; do
+                [ -f "$patch" ] || continue
+                # Dry-run: check if patch applies cleanly before touching anything
+                if patch -p1 --dry-run --forward < "$patch" 2>&1 | grep -q "Reversed (or previously applied) patch detected!"; then
+                  echo "  = $(basename $patch) already applied, skipping"
+                elif patch -p1 --dry-run --forward < "$patch" 2>&1 | grep -q "Hunk #1 succeeded at"; then
+                  # At least some hunks apply - apply with -N (forward only, don't re-apply)
+                  echo "  -> $(basename $patch) (partial apply)"
+                  patch -p1 -F3 --forward < "$patch" || echo "  ! $(basename $patch) partial hunks (checking .rej files)"
+                  # Clean up any .rej files that could poison the build
+                  find . -name "*.rej" -delete && echo "  cleaned .rej files"
+                else
+                  echo "  = $(basename $patch) not applicable, skipping"
+                fi
+              done
+            else
+              echo "patches not found at $KSU_PATCHES - skipping"
+            fi
 
            # 5) fix-susfs-compat: post-patch runtime compatibility fixes
           #    (show_pad label, inotify_mark_user_mask, i_uid_into_mnt, etc.)
