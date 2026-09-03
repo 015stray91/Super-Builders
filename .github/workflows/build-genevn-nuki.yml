@@ -178,8 +178,26 @@ jobs:
           sed -i 's/^CONFIG_LTO_CLANG_THIN=y/# CONFIG_LTO_CLANG_THIN is not set/' out/.config
           sed -i 's/^CONFIG_KERNEL_MODE_NEON=y/# CONFIG_KERNEL_MODE_NEON is not set/' out/.config
           # Disable squashfs entirely - both FILE_CACHE and FILE_DIRECT define squashfs_readpage_block
-          # causing duplicate symbol errors. NUKI/NURFS doesn't need squashfs. Disable wholesale.
-          sed -i 's/^CONFIG_SQUASHFS=y/# CONFIG_SQUASHFS is not set/' out/.config
+          # causing duplicate symbol link errors. NUKI/NURFS doesn't need squashfs.
+          # Use scripts/config -d to properly comment out all squashfs-related options.
+          if [ -f scripts/config ]; then
+            scripts/config --file out/.config \
+              -d CONFIG_SQUASHFS \
+              -d CONFIG_SQUASHFS_FILE_CACHE \
+              -d CONFIG_SQUASHFS_FILE_DIRECT \
+              -d CONFIG_SQUASHFS_DECOMP_SINGLE \
+              -d CONFIG_SQUASHFS_DECOMP_MULTI \
+              -d CONFIG_SQUASHFS_DECOMP_MULTI_PERCPU \
+              -d CONFIG_SQUASHFS_LZ4 \
+              -d CONFIG_SQUASHFS_LZO \
+              -d CONFIG_SQUASHFS_XZ \
+              -d CONFIG_SQUASHFS_ZSTD \
+              -d CONFIG_SQUASHFS_ZLIB \
+              -d CONFIG_SQUASHFS_XATTR \
+              -d CONFIG_SQUASHFS_POSIX_ACL \
+              -d CONFIG_SQUASHFS_UNCOMPRESS_DEBUG \
+              -d CONFIG_SQUASHFS_FRAGMENT_CACHE_SIZE || true
+          fi
           # CIFS_SMBD conflicts with cifs_listxattr (cifsfs.h #define cifs_listxattr NULL
           # when SMBD is on, then xattr.c redefines function = syntax error)
           sed -i 's/^CONFIG_CIFS_SMBD=y/# CONFIG_CIFS_SMBD is not set/' out/.config
