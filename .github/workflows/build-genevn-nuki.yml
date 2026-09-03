@@ -67,10 +67,12 @@ jobs:
           git clone --filter=blob:none --no-checkout "$KSU_REPO" /tmp/ksu-source
           (cd /tmp/ksu-source && git fetch --depth=1 origin "$KSU_PIN" && git checkout FETCH_HEAD)
           echo "=== KernelSU-Next contents ==="
-          ls /tmp/ksu-source/kernel/
-          echo "=== Copying kernel/ into kernel-source/kernel/KernelSU ==="
+          ls /tmp/ksu-source/
+          echo "=== Copying KernelSU into kernel-source/kernel/KernelSU ==="
           mkdir -p kernel-source/kernel/KernelSU
           cp -r /tmp/ksu-source/kernel/. kernel-source/kernel/KernelSU/
+          echo "=== Copying KernelSU uapi headers into kernel-source ==="
+          cp -r /tmp/ksu-source/uapi kernel-source/kernel/KernelSU/
           echo "=== Removing duplicate Makefile (use kernel-source build) ==="
           rm -f kernel-source/kernel/KernelSU/Makefile
           echo "=== Adding obj-y += KernelSU/ to kernel/Makefile ==="
