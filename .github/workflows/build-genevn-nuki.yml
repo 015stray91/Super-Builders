@@ -167,7 +167,17 @@ jobs:
           sed -i 's/^CONFIG_SYSTEM_TRUSTED_KEYRING=y/# CONFIG_SYSTEM_TRUSTED_KEYRING is not set/' out/.config
           sed -i 's|^CONFIG_SYSTEM_TRUSTED_KEYS=.*|CONFIG_SYSTEM_TRUSTED_KEYS=""|' out/.config
           sed -i 's|^CONFIG_SYSTEM_REVOCATION_KEYS=.*|CONFIG_SYSTEM_REVOCATION_KEYS=""|' out/.config
+          # Disable LTO - duplicate symbol errors appear without LTO's cross-TU deduplication.
+          # squashfs (file_direct + file_cache), qcom_common (sysmon_get_reason),
+          # dwc3-msm.h, soc_sleep_stats all define the same function in headers.
+          # Also disable KERNEL_MODE_NEON (broken LZ4 ARM64 NEON path - deploy_lz4.sh provides alt).
+          # Disable SQUASHFS_FILE_DIRECT or SQUASHFS_FILE_CACHE (both define squashfs_readpage_block).
+          sed -i 's/^CONFIG_LTO=y/# CONFIG_LTO is not set/' out/.config
+          sed -i 's/^CONFIG_LTO_CLANG=y/# CONFIG_LTO_CLANG is not set/' out/.config
+          sed -i 's/^CONFIG_LTO_CLANG_FULL=y/# CONFIG_LTO_CLANG_FULL is not set/' out/.config
+          sed -i 's/^CONFIG_LTO_CLANG_THIN=y/# CONFIG_LTO_CLANG_THIN is not set/' out/.config
           sed -i 's/^CONFIG_KERNEL_MODE_NEON=y/# CONFIG_KERNEL_MODE_NEON is not set/' out/.config
+          sed -i 's/^CONFIG_SQUASHFS_FILE_DIRECT=y/# CONFIG_SQUASHFS_FILE_DIRECT is not set/' out/.config
           # CIFS_SMBD conflicts with cifs_listxattr (cifsfs.h #define cifs_listxattr NULL
           # when SMBD is on, then xattr.c redefines function = syntax error)
           sed -i 's/^CONFIG_CIFS_SMBD=y/# CONFIG_CIFS_SMBD is not set/' out/.config
@@ -210,10 +220,9 @@ jobs:
           export LLVM=1
           export LLVM_IAS=1
           export CC=clang
-          export LD=aarch64-linux-gnu-ld
-          # GNU ld (binutils) is required for KVM nVHE partial link (-r -T linker-script).
-          # ld.lld cannot handle the hyp nvhe .o partial link with linker script.
-          # aarch64-linux-gnu-ld works for both partial link (nvhe) and final vmlinux.
+          export LD=ld.lld
+          # ld.lld: when LTO is disabled, all .o files are plain ELF. lld handles the
+          # KVM nVHE partial link (-r -T) without LTO bitcode "Invalid record" errors.
           export AR=llvm-ar
           export NM=llvm-nm
           export OBJCOPY=llvm-objcopy
@@ -363,13 +372,13 @@ jobs:
            # the env exports above (LLVM=1, LLVM_IAS=1) - do NOT clobber them.
            yes '' | make O=out ARCH=arm64 \
              CROSS_COMPILE=aarch64-linux-gnu- \
-              CC=clang LD=aarch64-linux-gnu-ld CLANG_TRIPLE=aarch64-linux-gnu- \
+              CC=clang LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- \
              olddefconfig 2>&1 | tail -5
 
            # Now build with the fully-resolved config
            make O=out ARCH=arm64 \
              CROSS_COMPILE=aarch64-linux-gnu- \
-              CC=clang LD=aarch64-linux-gnu-ld CLANG_TRIPLE=aarch64-linux-gnu- \
+              CC=clang LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- \
              -j$(nproc --all) Image.lz4 modules 2>&1 | tee ../build.log
 
           ls -lh out/arch/arm64/boot/Image.lz4 || (echo "FAIL"; tail -100 ../build.log; exit 1)
