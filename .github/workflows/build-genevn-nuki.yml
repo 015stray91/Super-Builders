@@ -245,26 +245,15 @@ jobs:
           export LLVM=1
           export LLVM_IAS=1
           export CLANG_TRIPLE=aarch64-linux-gnu-
-          # Override CC/LD/AR/NM to the in-tree snapdragon-style absolute paths, but
-          # point them at /usr/bin/clang-12 (which actually exists on CI).
-          # If the snapdragon clang IS cloned in fully, fall back to it.
-          if [ -x tools/toolchains/snapdragon-toolchain/clang-r416183b/bin/clang ]; then
-            export CC=tools/toolchains/snapdragon-toolchain/clang-r416183b/bin/clang
-            export LD=tools/toolchains/snapdragon-toolchain/clang-r416183b/bin/ld.lld
-            export AR=tools/toolchains/snapdragon-toolchain/clang-r416183b/bin/llvm-ar
-            export NM=tools/toolchains/snapdragon-toolchain/clang-r416183b/bin/llvm-nm
-            export OBJCOPY=tools/toolchains/snapdragon-toolchain/clang-r416183b/bin/llvm-objcopy
-            export OBJDUMP=tools/toolchains/snapdragon-toolchain/clang-r416183b/bin/llvm-objdump
-            export STRIP=tools/toolchains/snapdragon-toolchain/clang-r416183b/bin/llvm-strip
-          else
-            export CC=clang-12
-            export LD=ld.lld-12
-            export AR=llvm-ar-12
-            export NM=llvm-nm-12
-            export OBJCOPY=llvm-objcopy-12
-            export OBJDUMP=llvm-objdump-12
-            export STRIP=llvm-strip-12
-          fi
+          # Always use absolute system paths (the in-tree symlinks confuse Kconfig's
+          # compiler-existence check at olddefconfig time).
+          export CC=/usr/bin/clang-12
+          export LD=/usr/bin/ld.lld-12
+          export AR=/usr/bin/llvm-ar-12
+          export NM=/usr/bin/llvm-nm-12
+          export OBJCOPY=/usr/bin/llvm-objcopy-12
+          export OBJDUMP=/usr/bin/llvm-objdump-12
+          export STRIP=/usr/bin/llvm-strip-12
           echo "Using CC=$CC"
           "$CC" --version | head -1
 
