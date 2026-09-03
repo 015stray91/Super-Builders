@@ -229,22 +229,11 @@ jobs:
           #   Image.lz4 + modules, Clang 12 inner, LLVM=1, LLVM_IAS=1
           export ARCH=arm64
           export SUBARCH=arm64
-          # Use strict Android-specific target prefix for binary utilities.
-          # Enforces aarch64-linux-android- across the entire pipeline so the
-          # linker/assembler/objcopy grab the Snapdragon repo's internal GCC
-          # tools rather than the system's aarch64-linux-gnu- fallbacks.
           export CROSS_COMPILE=aarch64-linux-gnu-
-          export LLVM=1
-          export LLVM_IAS=1
-          # Hardcode version-suffixed executables so the build doesn't fall back
-          # to host defaults when compiling deep drivers.
-          export CC=clang
-          export LD=ld.lld
-          export AR=llvm-ar
-          export NM=llvm-nm
-          export OBJCOPY=llvm-objcopy
-          export OBJDUMP=llvm-objdump
-          export STRIP=llvm-strip
+          # Do NOT export LLVM=1 here - it overrides the Makefile's SD_CLANG setting
+          # (CC=clang, LD=ld.lld bare names resolve to system clang which doesn't exist).
+          # The Makefile at line 12 sets SD_CLANG=$(TOOLCHAIN)/clang-r416183b/bin
+          # and line 14 sets CC=$(SD_CLANG)/clang by default. Let it use the snapdragon toolchain.
           export CLANG_TRIPLE=aarch64-linux-gnu-
 
           # Pure compile: .config already complete from merge_nuki.py - no Kconfig prompts
@@ -383,18 +372,20 @@ jobs:
            # Use olddefconfig (auto-accept all defaults from .config, no prompts).
            # sparse .config causes silentoldconfig to ask about ARCH_QCOM variants
            # and other NEW options. Pipe 'yes' to auto-accept.
-           yes '' | make O=out ARCH=arm64 \
-             CROSS_COMPILE=aarch64-linux-gnu- \
-             CC=clang LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- \
-             olddefconfig 2>&1 | tail -5
+            yes '' | make O=out ARCH=arm64 \
+              CROSS_COMPILE=aarch64-linux-gnu- \
+              CLANG_TRIPLE=aarch64-linux-gnu- \
+              olddefconfig 2>&1 | tail -5
 
-           # Build with the fully-resolved config. Drop -j to a fixed -j4 to
-           # avoid OOM at the 25-minute mark when the system hits high memory
-           # pressure during heavy parallel compilation. Slower but stable.
-           make O=out ARCH=arm64 \
-             CROSS_COMPILE=aarch64-linux-gnu- \
-             CC=clang LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- \
-             -j4 Image.lz4 modules 2>&1 | tee ../build.log
+            # Build with the fully-resolved config. Drop -j to a fixed -j4 to
+            # avoid OOM at the 25-minute mark when the system hits high memory
+            # pressure during heavy parallel compilation. Slower but stable.
+            # Do NOT pass CC=clang or LD=ld.lld here - override overrides Makefile's
+            # SD_CLANG path (snapdragon toolchain) and breaks the build.
+            make O=out ARCH=arm64 \
+              CROSS_COMPILE=aarch64-linux-gnu- \
+              CLANG_TRIPLE=aarch64-linux-gnu- \
+              -j4 Image.lz4 modules 2>&1 | tee ../build.log
 
           ls -lh out/arch/arm64/boot/Image.lz4 || (echo "FAIL"; tail -100 ../build.log; exit 1)
           mkdir -p ../modules
