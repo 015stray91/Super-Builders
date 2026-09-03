@@ -125,12 +125,11 @@ jobs:
           #   ../../android12-5.10/build-helpers/
           #   ../../android12-5.10/KernelSU-Next/patches/    (NOTE: 'patches', not 'Ksu-patches')
           # NUKI Colonel is android12 (5.10.233) per device's last A12 update.
-          # From kernel-source/ (= GITHUB_WORKSPACE/kernel-source/):
-          #   ../                 = GITHUB_WORKSPACE/
-          #   ../super-builders/  = where Super-Builders repo is checked out
-          #   ../super-builders/android12-5.10/  = patches & helpers
-          HELPER="../super-builders/android12-5.10/build-helpers"
-          KSU_PATCHES="../super-builders/android12-5.10/KernelSU-Next/patches"
+          # From kernel-source/ (= GITHUB_WORKSPACE/super-builders/kernel-source/):
+          #   ../                   = GITHUB_WORKSPACE/super-builders/ (Super-Builders repo root)
+          #   ../android12-5.10/   = helpers & patches
+          HELPER="../android12-5.10/build-helpers"
+          KSU_PATCHES="../android12-5.10/KernelSU-Next/patches"
           SUBLEVEL=$(grep "^SUBLEVEL =" Makefile | head -1 | awk '{print $3}')
 
           # 1) bypass-oem-abi: strips GKI protected_exports, disables TRIM in gki_defconfig
