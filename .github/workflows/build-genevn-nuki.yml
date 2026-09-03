@@ -56,6 +56,31 @@ jobs:
             ls /home/slm015/compiler-node/fetched/Kotoamatsukami/bin/build/Kotoamatsukami.so || \
             echo "Kotoamatsukami.so: source-only (built locally)"
 
+      - name: Clone KernelSU-Next source into kernel tree
+        run: |
+          # The kernel/Kbuild patch references "kernelsu-objs" but the KSU source
+          # itself is NOT in kernel-msm-1 — it lives in upstream KernelSU-Next.
+          # Pin commit from android12-5.10/KernelSU-Next/kernelsu-next-pin.txt
+          KSU_PIN="095f780bf8835e92b51d06fce4afe7733f86a64c"
+          KSU_REPO="https://github.com/KernelSU-Next/KernelSU-Next.git"
+          echo "=== Cloning KernelSU-Next @ $KSU_PIN ==="
+          git clone --depth=1 --branch "$KSU_PIN" "$KSU_REPO" /tmp/ksu-source
+          echo "=== KernelSU-Next contents ==="
+          ls /tmp/ksu-source/kernel/
+          echo "=== Copying kernel/KernelSU/ into kernel-source ==="
+          cp -r /tmp/ksu-source/kernel kernel-source/kernel/KernelSU
+          echo "=== Adding obj-y += KernelSU/ to kernel/Makefile ==="
+          if ! grep -q "obj-y.*+=.*KernelSU" kernel-source/kernel/Makefile; then
+            echo "obj-y += KernelSU/" >> kernel-source/kernel/Makefile
+          fi
+          echo "=== Removing GKI stub files from KernelSU (not needed for GKI) ==="
+          rm -f kernel-source/kernel/KernelSU/Makefile
+          echo "=== Verify KernelSU source is present ==="
+          ls kernel-source/kernel/KernelSU/
+          echo "=== Verifying KSU hooks are defined ==="
+          grep -r "ksu_handle_setresuid\|ksu_su_compat_enabled" kernel-source/kernel/KernelSU/feature/ 2>/dev/null | head -5 || \
+            grep -r "ksu_handle_setresuid\|ksu_su_compat_enabled" kernel-source/kernel/KernelSU/ 2>/dev/null | head -5
+
       - name: Patch KVM nvhe Makefile (fix MODVERSIONS + fPIC conflict)
         run: |
           # CONFIG_MODVERSIONS generates __kvm_nvhe___crc_* absolute symbols.
