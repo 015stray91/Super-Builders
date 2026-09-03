@@ -82,10 +82,11 @@ jobs:
           cd kernel-source
           # In CI, Super-Builders is the workspace root. From kernel-source/,
           # the paths are:
-          #   android14-6.1/KernelSU-Next/build-helpers/
-          #   android14-6.1/KernelSU-Next/patches/    (NOTE: 'patches', not 'Ksu-patches')
-          HELPER="../android14-6.1/KernelSU-Next/build-helpers"
-          KSU_PATCHES="../android14-6.1/KernelSU-Next/patches"
+          #   android12-5.10/KernelSU-Next/build-helpers/
+          #   android12-5.10/KernelSU-Next/patches/    (NOTE: 'patches', not 'Ksu-patches')
+          # NUKI Colonel is android12 (5.10.233) per device's last A12 update.
+          HELPER="../android12-5.10/build-helpers"
+          KSU_PATCHES="../android12-5.10/KernelSU-Next/patches"
           SUBLEVEL=$(grep "^SUBLEVEL =" Makefile | head -1 | awk '{print $3}')
 
           # 1) bypass-oem-abi: strips GKI protected_exports, disables TRIM in gki_defconfig
@@ -147,6 +148,9 @@ jobs:
       - name: Use Pre-Merged NUKI Colonel .config
         run: |
           cd kernel-source
+          # Nuke any stale out/ from a previous run (different branch/source
+          # can leave .o files that duplicate-current-source symbols on link).
+          rm -rf out
           mkdir -p out
           # The merged NUKI Colonel .config is committed to kernel-msm-1 root
           # (nuki-colonel.config). It contains all 7 pillars merged by
