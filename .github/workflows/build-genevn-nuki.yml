@@ -167,8 +167,9 @@ jobs:
           sed -i 's/^CONFIG_SYSTEM_TRUSTED_KEYRING=y/# CONFIG_SYSTEM_TRUSTED_KEYRING is not set/' out/.config
           sed -i 's|^CONFIG_SYSTEM_TRUSTED_KEYS=.*|CONFIG_SYSTEM_TRUSTED_KEYS=""|' out/.config
           sed -i 's|^CONFIG_SYSTEM_REVOCATION_KEYS=.*|CONFIG_SYSTEM_REVOCATION_KEYS=""|' out/.config
-          # Squashfs files removed above. Keep LTO enabled - it resolves remaining
-          # duplicate symbols (qcom_common, dwc3, soc_sleep_stats) via cross-TU deduplication.
+          # Squashfs files removed above. Keep LTO enabled via ThinLTO (not FullLTO).
+          # ThinLTO processes modules in parallel shards without aggressive cross-TU optimization,
+          # preventing KVM hypervisor LLD plugin conflicts while still resolving duplicate symbols.
           # Disable KERNEL_MODE_NEON (broken LZ4 ARM64 NEON path - deploy_lz4.sh provides alt).
           # Remove problematic squashfs files causing duplicate symbol errors.
           # decompressor_single.c and decompressor_multi_percpu.c both define global
@@ -183,8 +184,13 @@ jobs:
           # Remove corresponding entries from Makefile
           sed -i '/file_cache\.o\|file_direct\.o\|page_actor\.o\|decompressor_single\.o\|decompressor_multi\.o\|decompressor_multi_percpu\.o/d' fs/squashfs/Makefile
           # Disable KERNEL_MODE_NEON (broken LZ4 ARM64 NEON path - deploy_lz4.sh provides alt).
-          # LTO stays enabled - resolves remaining duplicate symbols (qcom_common, dwc3, soc_sleep_stats).
+          # Switch to ThinLTO (not FullLTO) - processes modules in parallel shards without
+          # destructive cross-TU optimization that breaks KVM LLD plugin pass.
+          # ThinLTO still resolves duplicate symbols (qcom_common, dwc3, soc_sleep_stats).
           sed -i 's/^CONFIG_KERNEL_MODE_NEON=y/# CONFIG_KERNEL_MODE_NEON is not set/' out/.config
+          sed -i 's/^CONFIG_LTO_CLANG_FULL=y/# CONFIG_LTO_CLANG_FULL is not set/' out/.config
+          grep -q "^# CONFIG_LTO_CLANG_THIN is not set" out/.config && \
+            sed -i 's/^# CONFIG_LTO_CLANG_THIN is not set/CONFIG_LTO_CLANG_THIN=y/' out/.config || true
           # CIFS_SMBD conflicts with cifs_listxattr (cifsfs.h #define cifs_listxattr NULL
           # when SMBD is on, then xattr.c redefines function = syntax error)
           sed -i 's/^CONFIG_CIFS_SMBD=y/# CONFIG_CIFS_SMBD is not set/' out/.config
