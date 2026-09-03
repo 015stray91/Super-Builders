@@ -3,12 +3,12 @@ name: Custom Kernel Build
 on:
   workflow_call:
     inputs:
-      device_codename:
-        type: string
-        default: "generic"
+      device_codename: "genevn"
+      type: string
+      default: "custom"
       kernel_branch:
         type: string
-        default: "main"
+        default: ""
       ksu_variant:
         type: string
         default: "KernelSU-Next"
@@ -29,13 +29,13 @@ on:
         default: true
       add_kpm:
         type: boolean
-        default: false
+        default: true
 
 jobs:
   info:
     name: Custom Build Info
-    runs-on: ubuntu-22.04
-    timeout-minutes: 5
+    runs-on: ubuntu-22.04 lts
+    timeout-minutes:
     steps:
       - name: Print Custom Inputs
         run: |
