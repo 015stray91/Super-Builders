@@ -23,43 +23,4 @@
       "add_kpm": true,
       "add_nethunter": true
     },
-    "lake": {
-      "name": "Xiaomi Redmi 14C",
-      "codename": "lake",
-      "android_version": "android12",
-      "kernel_version": "5.10",
-      "sub_level": "209",
-      "os_patch_level": "2024-05",
-      "stock_kernel": {
-        "release": "-android12-9-00016-g7c6bbcca33e1-ab12029497",
-        "version_string": "#1 SMP PREEMPT Fri Jun 28 13:58:53 UTC 2024",
-        "build_user": "build-user",
-        "build_host": "build-host",
-        "compiler_info": "Android (7284624, based on r416183b) clang version 12.0.5"
-      }
-    }
-  },
-  "_template": {
-    "name": "Device Name",
-    "codename": "codename",
-    "android_version": "android14",
-    "kernel_version": "5.10",
-    "sub_level": "42",
-    "os_patch_level": "2024-03",
-    "kernel_source": "https://github.com/USER/kernel-source.git",
-    "kernel_branch": "main",
-    "toolchain": "https://github.com/USER/android-kernel-tools.git",
-    "defconfig": "ksu-nh.defconfig",
-    "vendor_config": "arch/arm64/configs/vendor/device.config",
-    "debug_config": "arch/arm64/configs/vendor/ext_config/debug.config",
-    "nurfs_fragment": "arch/arm64/configs/nurfs-linux.fragment",
-      "nethunter_patches": "kali-nethunter-kernel-builder-main/patches/ksu a12-5.10 patches",
-      "anykernel": "https://github.com/USER/AnyKernel.git",
-      "add_susfs": true,
-    "add_zeromount": true,
-    "add_zram": true,
-    "add_overlayfs": true,
-    "add_kpm": true,
-    "add_nethunter": true
-  }
-}
+    
