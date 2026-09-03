@@ -177,7 +177,9 @@ jobs:
           sed -i 's/^CONFIG_LTO_CLANG_FULL=y/# CONFIG_LTO_CLANG_FULL is not set/' out/.config
           sed -i 's/^CONFIG_LTO_CLANG_THIN=y/# CONFIG_LTO_CLANG_THIN is not set/' out/.config
           sed -i 's/^CONFIG_KERNEL_MODE_NEON=y/# CONFIG_KERNEL_MODE_NEON is not set/' out/.config
-          sed -i 's/^CONFIG_SQUASHFS_FILE_DIRECT=y/# CONFIG_SQUASHFS_FILE_DIRECT is not set/' out/.config
+          # Disable squashfs entirely - both FILE_CACHE and FILE_DIRECT define squashfs_readpage_block
+          # causing duplicate symbol errors. NUKI/NURFS doesn't need squashfs. Disable wholesale.
+          sed -i 's/^CONFIG_SQUASHFS=y/# CONFIG_SQUASHFS is not set/' out/.config
           # CIFS_SMBD conflicts with cifs_listxattr (cifsfs.h #define cifs_listxattr NULL
           # when SMBD is on, then xattr.c redefines function = syntax error)
           sed -i 's/^CONFIG_CIFS_SMBD=y/# CONFIG_CIFS_SMBD is not set/' out/.config
