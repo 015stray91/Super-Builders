@@ -54,24 +54,26 @@ jobs:
             ls /home/slm015/compiler-node/fetched/Kotoamatsukami/bin/build/Kotoamatsukami.so || \
             echo "Kotoamatsukami.so: source-only (built locally)"
 
-      - name: Setup In-Tree Toolchain (symlink llvm-* and clang from llvm-12)
+      - name: Setup In-Tree Toolchain (force clang-12 from llvm-12 package)
         run: |
-          # git clone --depth=1 misses binary blobs in snapdragon-toolchain (including clang).
-          # Symlink all missing utilities from system llvm-12 into the in-tree toolchain.
+          # The in-tree snapdragon-toolchain/clang-r416183b/bin/ may contain clang 14
+          # (from git LFS or other source) which is incompatible with lld-12.
+          # FORCE override: always point to system clang-12 (LLVM 12.0.1, matches lld-12/ar/nm).
           TOOLCHAIN_BIN=kernel-source/tools/toolchains/snapdragon-toolchain/clang-r416183b/bin
           mkdir -p "$TOOLCHAIN_BIN"
-          # Symlink clang + all llvm-* tools if not already present in the toolchain dir
           for tool in clang ld.lld llvm-ar llvm-nm llvm-objcopy llvm-objdump llvm-strip llvm-readelf; do
-            if [ ! -e "$TOOLCHAIN_BIN/$tool" ] && [ -e /usr/bin/$tool-12 ]; then
+            if [ -e /usr/bin/$tool-12 ]; then
               sudo ln -sf /usr/bin/$tool-12 "$TOOLCHAIN_BIN/$tool"
-              echo "  linked $tool -> /usr/bin/$tool-12"
-            elif [ ! -e "$TOOLCHAIN_BIN/$tool" ] && [ -e /usr/bin/$tool ]; then
-              # Some tools don't have -12 version, use bare name
+              echo "  -> $tool = /usr/bin/$tool-12"
+            elif [ -e /usr/bin/$tool ]; then
               sudo ln -sf /usr/bin/$tool "$TOOLCHAIN_BIN/$tool"
-              echo "  linked $tool -> /usr/bin/$tool"
+              echo "  -> $tool = /usr/bin/$tool"
             fi
           done
+          echo "=== Toolchain binaries ==="
           ls -la "$TOOLCHAIN_BIN/" | head -10
+          echo "=== Clang version ==="
+          "$TOOLCHAIN_BIN/clang" --version | head -2
 
       - name: Apply Build Helpers (bypass ABI, fix compat, apply KSU seal patches)
         run: |
