@@ -351,22 +351,23 @@ jobs:
           export CONFIG_TRIM_UNUSED_KSYMS=n
           set +a
 
-          # Use silentoldconfig (auto-accept all defaults from .config, no prompts)
-          # This avoids 'yes' re-enabling things like CIFS that aren't set
+           # Use silentoldconfig (auto-accept all defaults from .config, no prompts)
+           # This avoids 'yes' re-enabling things like CIFS that aren't set
            # Auto-answer NEW config prompts with default (N for most). sparse .config
            # causes silentoldconfig to ask about ARCH_QCOM/L AHAINA/WAIPIO/etc variants.
+           # IMPORTANT: do NOT pass LLVM=-12 on make cmdline; the kernel Makefile
+           # parses LLVM=<tool-prefix>. Use LLVM=12 with clang-12 binaries, or rely on
+           # the env exports above (LLVM=1, LLVM_IAS=1) - do NOT clobber them.
            yes '' | make O=out ARCH=arm64 \
              CROSS_COMPILE=aarch64-linux-gnu- \
              CC=clang LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- \
-             LLVM=-12 LLVM_IAS=-12 \
-             silentoldconfig 2>&1 | tail -5
+             olddefconfig 2>&1 | tail -5
 
-          # Now build with the fully-resolved config
-          make O=out ARCH=arm64 \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CC=clang LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- \
-            LLVM=-12 LLVM_IAS=-12 \
-            -j$(nproc --all) Image.lz4 modules 2>&1 | tee ../build.log
+           # Now build with the fully-resolved config
+           make O=out ARCH=arm64 \
+             CROSS_COMPILE=aarch64-linux-gnu- \
+             CC=clang LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- \
+             -j$(nproc --all) Image.lz4 modules 2>&1 | tee ../build.log
 
           ls -lh out/arch/arm64/boot/Image.lz4 || (echo "FAIL"; tail -100 ../build.log; exit 1)
           mkdir -p ../modules
