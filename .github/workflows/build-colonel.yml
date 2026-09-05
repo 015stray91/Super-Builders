@@ -53,25 +53,33 @@ jobs:
           sudo ln -sf /usr/bin/ld.lld-12 /usr/local/bin/ld.lld
           sudo ln -sf /usr/bin/ld.lld-12 /usr/local/bin/ld64.lld
 
-      - name: Clone Kotoamatsukami (Clang 17 obfuscator)
+      - name: Pull pre-built Kotoamatsukami LLVM 17 plugin (remote, no build)
         run: |
+          # The Kotoamatsukami LLVM 17 plugin is PRE-BUILT in the remote repo.
+          # Colonel workflow uses the pre-built .so directly - no local build needed.
           BRANCH="${{ inputs.koto_branch }}"
           [ -z "$BRANCH" ] && BRANCH="llvm-17-plugins"
-          echo "Cloning Kotoamatsukami @ $BRANCH"
+          echo "Cloning Kotoamatsukami @ $BRANCH (pre-built pull)"
           git clone --depth=1 -b "$BRANCH" https://github.com/015stray91/Kotoamatsukami.git kotoamatsukami
-          echo "=== Building Kotoamatsukami plugin ==="
-          cd kotoamatsukami
-          mkdir -p build && cd build
-          # Configure for LLVM 17
-          if [ -f /usr/lib/llvm-17/lib/cmake/llvm/LLVMConfig.cmake ]; then
-            LLVM_DIR=/usr/lib/llvm-17/lib/cmake/llvm
+          if [ -f kotoamatsukami/bin/build/Kotoamatsukami.so ]; then
+            sudo install -m 0755 kotoamatsukami/bin/build/Kotoamatsukami.so /usr/local/lib/
+            echo "Kotoamatsukami.so installed from remote pre-built copy"
+            file /usr/local/lib/Kotoamatsukami.so
           else
-            LLVM_DIR=/usr/lib/cmake/llvm-17
+            echo "WARNING: pre-built .so missing, falling back to local build"
+            cd kotoamatsukami
+            mkdir -p build && cd build
+            if [ -f /usr/lib/llvm-17/lib/cmake/llvm/LLVMConfig.cmake ]; then
+              LLVM_DIR=/usr/lib/llvm-17/lib/cmake/llvm
+            else
+              LLVM_DIR=/usr/lib/cmake/llvm-17
+            fi
+            cmake -G Ninja -DLLVM_DIR="$LLVM_DIR" -DCMAKE_BUILD_TYPE=Release .. 2>&1 | tail -5
+            ninja -j$(nproc) 2>&1 | tail -5
+            if [ -f Kotoamatsukami.so ]; then
+              sudo install -m 0755 Kotoamatsukami.so /usr/local/lib/
+            fi
           fi
-          cmake -G Ninja -DLLVM_DIR="$LLVM_DIR" -DCMAKE_BUILD_TYPE=Release .. 2>&1 | tail -10
-          ninja -j$(nproc) 2>&1 | tail -10
-          echo "=== Kotoamatsukami plugin built ==="
-          ls -la Kotoamatsukami.so 2>/dev/null && echo "  -> Kotoamatsukami.so ready"
 
       - name: Clone kernel-msm-1 (Colonel branch)
         run: |
