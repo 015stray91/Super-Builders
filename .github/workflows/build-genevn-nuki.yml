@@ -148,7 +148,36 @@ jobs:
           echo "  clang-tools-static-binaries: pre-built LLVM versions 12-22"
           ls toolchain-static/
           echo "  Ladder: 12 -> 13 -> 14 -> 15 -> 16 -> 17 (target)"
-          echo "  Each version static-linked - no compile needed
+          echo "  Each version static-linked - no compile needed"
+
+          # Download official pre-built LLVM 12-17 to /tmp/clang-static-versions/
+          # This populates the ladder: 12 (baseline) up to 17 (target)
+          echo "=== Downloading official LLVM 12-17 (pre-built) ==="
+          mkdir -p /tmp/clang-static-versions
+          declare -A LLVM_VERSIONS
+          LLVM_VERSIONS[12]="12.0.1"
+          LLVM_VERSIONS[13]="13.0.1"
+          LLVM_VERSIONS[14]="14.0.7"
+          LLVM_VERSIONS[15]="15.0.7"
+          LLVM_VERSIONS[16]="16.0.6"
+          LLVM_VERSIONS[17]="17.0.6"
+
+          for v in 12 13 14 15 16 17; do
+            ver="${LLVM_VERSIONS[$v]}"
+            if [ ! -d "/tmp/clang-static-versions/llvm-$v" ]; then
+              echo "  Downloading LLVM $v ($ver)..."
+              url="https://github.com/llvm/llvm-project/releases/download/llvmorg-${ver}/clang+llvm-${ver}-x86_64-linux-gnu-ubuntu-18.04.tar.xz"
+              curl -L --max-time 600 -o "/tmp/clang-static-versions/clang+llvm-${ver}.tar.xz" "$url" 2>/dev/null || \
+              wget -q --timeout=600 -O "/tmp/clang-static-versions/clang+llvm-${ver}.tar.xz" "$url" 2>/dev/null || \
+              echo "  LLVM $v download failed - will use snapdragon 12 for inner"
+            fi
+            if [ -f "/tmp/clang-static-versions/clang+llvm-${ver}.tar.xz" ]; then
+              mkdir -p "/tmp/clang-static-versions/llvm-$v"
+              tar -xf "/tmp/clang-static-versions/clang+llvm-${ver}.tar.xz" \
+                -C "/tmp/clang-static-versions/llvm-$v" --strip-components=1 2>/dev/null
+              echo "  LLVM $v ready: $(ls /tmp/clang-static-versions/llvm-$v/bin/ 2>/dev/null | head -3)"
+            fi
+          done
           echo "=== Kotoamatsukami outer wrapper probe (local only) ==="
           [ -d /home/slm015/compiler-node/fetched/Kotoamatsukami ] && \
             ls /home/slm015/compiler-node/fetched/Kotoamatsukami/bin/build/Kotoamatsukami.so || \
