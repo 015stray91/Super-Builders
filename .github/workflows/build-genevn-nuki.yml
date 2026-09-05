@@ -51,27 +51,30 @@ jobs:
           sudo ln -sf /usr/bin/ld.lld-12 /usr/local/bin/ld64.lld
           sudo ln -sf /usr/bin/python3 /usr/local/bin/python
 
-      - name: Clone & Build Kotoamatsukami (Clang 17 wrapper at the start)
+      - name: Pull pre-built Kotoamatsukami LLVM 17 plugin (no build needed)
         run: |
-          # Kotoamatsukami = LLVM-17 obfuscator
-          # Clang 17 wraps around Clang 12 to flatten code, defeat scanners, preserve KMI
-          echo "=== Kotoamatsukami (LLVM 17 obfuscator) ==="
+          # Kotoamatsukami.so is pre-built in the remote repo at bin/build/
+          # Just clone it and copy the .so - no compilation step needed
+          echo "=== Kotoamatsukami (LLVM 17 obfuscator) - pre-built pull ==="
           git clone --depth=1 -b llvm-17-plugins https://github.com/015stray91/Kotoamatsukami.git kotoamatsukami
-          cd kotoamatsukami
-          echo "=== Building Kotoamatsukami LLVM 17 plugin ==="
-          mkdir -p build && cd build
-          if [ -f /usr/lib/llvm-17/lib/cmake/llvm/LLVMConfig.cmake ]; then
-            LLVM_DIR=/usr/lib/llvm-17/lib/cmake/llvm
+          if [ -f kotoamatsukami/bin/build/Kotoamatsukami.so ]; then
+            sudo install -m 0755 kotoamatsukami/bin/build/Kotoamatsukami.so /usr/local/lib/
+            echo "Kotoamatsukami.so installed from remote pre-built copy"
+            file /usr/local/lib/Kotoamatsukami.so
           else
-            LLVM_DIR=/usr/lib/cmake/llvm-17
-          fi
-          cmake -G Ninja -DLLVM_DIR="$LLVM_DIR" -DCMAKE_BUILD_TYPE=Release .. 2>&1 | tail -5
-          ninja -j$(nproc) 2>&1 | tail -5
-          if [ -f Kotoamatsukami.so ]; then
-            sudo install -m 0755 Kotoamatsukami.so /usr/local/lib/
-            echo "Kotoamatsukami.so installed to /usr/local/lib/"
-          else
-            echo "WARNING: Kotoamatsukami.so not built - will use clang-17 directly"
+            echo "WARNING: Kotoamatsukami.so not in remote - building from source"
+            cd kotoamatsukami
+            mkdir -p build && cd build
+            if [ -f /usr/lib/llvm-17/lib/cmake/llvm/LLVMConfig.cmake ]; then
+              LLVM_DIR=/usr/lib/llvm-17/lib/cmake/llvm
+            else
+              LLVM_DIR=/usr/lib/cmake/llvm-17
+            fi
+            cmake -G Ninja -DLLVM_DIR="$LLVM_DIR" -DCMAKE_BUILD_TYPE=Release .. 2>&1 | tail -5
+            ninja -j$(nproc) 2>&1 | tail -5
+            if [ -f Kotoamatsukami.so ]; then
+              sudo install -m 0755 Kotoamatsukami.so /usr/local/lib/
+            fi
           fi
 
       - name: Install Colonel Clang 17 Wrapper (the wrapper around the build)
