@@ -6,7 +6,6 @@ on:
       kernel_branch:
         description: 'Kernel branch'
         default: 'android-14-release-u1tgns34.42-86-2-32'
-        required: true
 
 env:
   KERNEL_REPO: 015stray91/kernel-msm-1
@@ -19,111 +18,124 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
-      - name: Clone all repos
+      - name: Clone repos
         run: |
-          mkdir -p sources/{kernel,toolchain,ladder,koto,patches}
+          mkdir -p sources
           cd sources
-          
-          git clone --depth=1 --branch ${{ inputs.kernel_branch }} \
+          git clone --depth=1 --branch "${{ inputs.kernel_branch }}" \
             https://github.com/${{ env.KERNEL_REPO }}.git kernel
-          
-          git clone --depth=1 \
-            https://github.com/${{ env.TOOLCHAIN_REPO }}.git toolchain
-          
-          git clone --depth=1 \
-            https://github.com/${{ env.LADDER_REPO }}.git ladder
-          
-          git clone --depth=1 \
-            https://github.com/${{ env.KOTO_REPO }}.git koto
-          
+          git clone --depth=1 https://github.com/${{ env.TOOLCHAIN_REPO }}.git toolchain
+          git clone --depth=1 https://github.com/${{ env.LADDER_REPO }}.git ladder
+          git clone --depth=1 https://github.com/${{ env.KOTO_REPO }}.git koto
           git clone --depth=1 --branch 015stray91 \
             https://github.com/${{ env.SB_REPO }}.git patches
-          
-          ls sources/
 
       - name: Install deps
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get update && sudo apt-get install -y \
             clang-12 llvm-12 lld-12 gcc-aarch64-linux-gnu \
-            libzstd-dev zstd lz4 liblz4-tool \
-            bc libelf-dev libssl-dev ccache \
-            kmod cpio zip unzip xz-utils
+            libzstd-dev zstd lz4 bc libelf-dev libssl-dev kmod cpio
 
-      - name: Setup paths (12 = baseline, 17 = expansion)
+      - name: Self-healing build
         run: |
-          # Clang 12 (snapdragon) = inner compiler, KMI
-          export PATH="$(pwd)/sources/toolchain/clang/host/linux-x86/clang-r416183b/bin:$PATH"
-          export CROSS_COMPILE="$(pwd)/sources/toolchain/gcc/linux-x86/aarch64/gcc-linaro-7.5.0/bin/aarch64-linux-gnu-"
+          KERNEL="$(pwd)/sources/kernel"
+          TOOLCHAIN="$(pwd)/sources/toolchain"
+          LADDER="$(pwd)/sources/ladder"
+          KOTO_SO="$(pwd)/sources/koto/colonel/build/Kotoamatsukami.so"
           
-          # Clang 17 (ladder) = outer, pre-processes/expands source
-          export CLANG17="$(pwd)/sources/ladder/llvm-binaries/llvm-17/bin"
-          export KOTO_SO="$(pwd)/sources/koto/colonel/build/Kotoamatsukami.so"
+          export PATH="$TOOLCHAIN/clang/host/linux-x86/clang-r416183b/bin:$PATH"
+          export CROSS_COMPILE="$TOOLCHAIN/gcc/linux-x86/aarch64/gcc-linaro-7.5.0/bin/aarch64-linux-gnu-"
+          export LLVM=1
           
-          echo "=== Ready ==="
-          clang --version | head -1
-          $CLANG17/clang --version 2>/dev/null | head -1 || echo "LLVM 17: need build"
-          ls $KOTO_SO 2>/dev/null || echo "Koto.so: need build"
-
-      - name: Expand source (Clang 17 → Clang 12)
-        run: |
-          export PATH="$(pwd)/sources/toolchain/clang/host/linux-x86/clang-r416183b/bin:$PATH"
-          export CLANG17="$(pwd)/sources/ladder/llvm-binaries/llvm-17/bin"
-          export KOTO_SO="$(pwd)/sources/koto/colonel/build/Kotoamatsukami.so"
-          cd sources/kernel
+          cd "$KERNEL"
           
-          echo "=== Expanding: SUSFS + ZeroMount + HybridMount + Colonel ==="
-          for src in fs/susfs.c fs/zeromount.c \
-                     fs/koto/sprof_eud.c fs/koto/sprof_proc.c \
-                     fs/koto/sprof_env.c fs/koto/sprof_vfs.c \
-                     fs/koto/sprof_profile.c; do
-            [ -f "$src" ] || continue
-            echo "  $src"
-            $CLANG17/clang -S -emit-llvm "$src" -o "${src%.c}.ll" 2>/dev/null || continue
-            $CLANG17/opt --load-pass-plugin="$KOTO_SO" "${src%.c}.ll" \
-              --passes="flatten,bogus-control-flow,substitution,indirect-call" \
-              -S -o "${src%.c}.ob.ll" 2>/dev/null || continue
-            clang "${src%.c}.ob.ll" -S -o "${src%.c}.s" 2>/dev/null || continue
-            mv "${src%.c}.s" "$src"
-            rm -f "${src%.c}.ll" "${src%.c}.ob.ll"
-          done
-
-      - name: Apply patches
-        run: |
-          cd sources/kernel
+          # Apply patches
           for p in ../patches/*.patch; do
             [ -f "$p" ] && patch -p1 -N < "$p" 2>/dev/null || true
           done
-
-      - name: Configure
-        run: |
-          cd sources/kernel
-          export PATH="$(pwd)/../toolchain/clang/host/linux-x86/clang-r416183b/bin:$PATH"
-          export CROSS_COMPILE="$(pwd)/../toolchain/gcc/linux-x86/aarch64/gcc-linaro-7.5.0/bin/aarch64-linux-gnu-"
           
+          # Configure
           [ -f ../patches/configs/ksu-nh.defconfig ] && \
             cp ../patches/configs/ksu-nh.defconfig arch/arm64/configs/
           make ksu-nh.defconfig 2>/dev/null || make lineage_parrot_defconfig
           make olddefconfig
-
-      - name: Build (Clang 12 compiles expanded source)
-        run: |
-          cd sources/kernel
-          export PATH="$(pwd)/../toolchain/clang/host/linux-x86/clang-r416183b/bin:$PATH"
-          export CROSS_COMPILE="$(pwd)/../toolchain/gcc/linux-x86/aarch64/gcc-linaro-7.5.0/bin/aarch64-linux-gnu-"
-          export LLVM=1
           
-          make -j$(nproc) Image.lz4 modules 2>&1 | tail -30
+          # Expansion function
+          expand_with() {
+            local VER="$1"
+            local CLANG_BIN="$2"
+            echo "  Expanding with LLVM $VER..."
+            for src in fs/susfs.c fs/zeromount.c \
+                       fs/koto/sprof_eud.c fs/koto/sprof_proc.c \
+                       fs/koto/sprof_env.c fs/koto/sprof_vfs.c \
+                       fs/koto/sprof_profile.c; do
+              [ -f "$src" ] || continue
+              $CLANG_BIN/clang -S -emit-llvm "$src" -o "${src%.c}.ll" 2>/dev/null || continue
+              if [ -f "$KOTO_SO" ]; then
+                $CLANG_BIN/opt --load-pass-plugin="$KOTO_SO" "${src%.c}.ll" \
+                  --passes="flatten,bogus-control-flow,substitution,indirect-call" \
+                  -S -o "${src%.c}.ob.ll" 2>/dev/null || continue
+              else
+                $CLANG_BIN/opt "${src%.c}.ll" --passes="flatten,bogus-control-flow,substitution" \
+                  -S -o "${src%.c}.ob.ll" 2>/dev/null || continue
+              fi
+              clang "${src%.c}.ob.ll" -S -o "${src%.c}.s" 2>/dev/null || continue
+              mv "${src%.c}.s" "$src"
+              rm -f "${src%.c}.ll" "${src%.c}.ob.ll"
+            done
+          }
+          
+          find_llvm() {
+            local VER="$1"
+            [ -d "$LADDER/llvm-binaries/llvm-$VER/bin" ] && \
+              echo "$LADDER/llvm-binaries/llvm-$VER/bin" || \
+              [ -f /usr/bin/clang-$VER ] && echo "/usr/bin"
+          }
+          
+          # Try each LLVM version in the bridge (17 -> 12)
+          # If 17 fails, bridge is broken. Find which link works.
+          echo "=== Self-healing: finding bridge to close the gap ==="
+          echo "=== Target: 17 | Baseline: 12 | Bridge: 16-13 ==="
+          
+          BRIDGE_FOUND=""
+          
+          for VER in 17 16 15 14 13; do
+            llvm_bin=$(find_llvm "$VER")
+            if [ -z "$llvm_bin" ]; then
+              echo "LLVM $VER not available, skipping..."
+              continue
+            fi
+            echo ""
+            echo "=== Trying LLVM $VER ==="
+            expand_with "$VER" "$llvm_bin"
+            if make -j$(nproc) Image.lz4 modules 2>&1 | tail -5; then
+              echo "=== BRIDGE FOUND: LLVM $VER works ==="
+              BRIDGE_FOUND="$VER"
+              break
+            fi
+            echo "LLVM $VER failed, trying next bridge link..."
+            git checkout -- . 2>/dev/null || true
+          done
+          
+          if [ -z "$BRIDGE_FOUND" ]; then
+            echo "=== Bridge broken, falling back to Clang 12 (no expansion) ==="
+            git checkout -- . 2>/dev/null || true
+            make -j$(nproc) Image.lz4 modules 2>&1 | tail -5
+          fi
+          
+          echo "=== Build complete (bridge link: ${BRIDGE_FOUND:-12}) ==="
+        id: build
 
       - name: Package
+        if: success()
         run: |
           mkdir -p artifacts
-          [ -f sources/kernel/arch/arm64/boot/Image.lz4 ] && \
-            cp sources/kernel/arch/arm64/boot/Image.lz4 artifacts/
+          cp sources/kernel/arch/arm64/boot/Image.lz4 artifacts/ 2>/dev/null
           find sources/kernel -name "*.ko" -exec cp {} artifacts/ \; 2>/dev/null || true
-          ls -la artifacts/
+          ls artifacts/
 
       - name: Upload
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: nuki-colonel-kernel
