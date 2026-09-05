@@ -115,24 +115,28 @@ jobs:
           echo "=== In-tree toolchain (snapdragon) ==="
           ls kernel-source/tools/toolchains/snapdragon-toolchain/
 
-      - name: Pull snapdragon-toolchain (pre-built, from remote android-kernel-tools)
+      - name: Pull toolchains (snapdragon + clang-tools-static-binaries)
         run: |
-          # The snapdragon toolchain (clang-r416183b + gcc-linaro-7.5) is the
-          # INNER compiler. Pulled from remote android-kernel-tools repo.
-          echo "=== Pulling snapdragon-toolchain from remote ==="
-          git clone --depth=1 https://github.com/015stray91/android-kernel-tools.git toolchain-android-kernel-tools
-          if [ -d toolchain-android-kernel-tools/clang/host/linux-x86/clang-r416183b ]; then
-            echo "  Clang 12 (clang-r416183b) available"
-            ls toolchain-android-kernel-tools/clang/host/linux-x86/clang-r416183b/bin/ | head -5
+          # BLEND: snapdragon-toolchain + clang-tools-static-binaries
+          # snapdragon = Clang 12 (inner, KMI matching)
+          # clang-tools-static = Clang 17 (outer, expansion/pre-processing)
+          echo "=== Pulling snapdragon-toolchain (Clang 12 - inner compiler) ==="
+          git clone --depth=1 https://github.com/015stray91/android-kernel-tools.git toolchain-snapdragon
+          if [ -d toolchain-snapdragon/clang/host/linux-x86/clang-r416183b ]; then
+            echo "  Clang 12 (clang-r416183b) - KMI matching compiler"
+            ls toolchain-snapdragon/clang/host/linux-x86/clang-r416183b/bin/ | head -5
           fi
-          if [ -d toolchain-android-kernel-tools/gcc/linux-x86/aarch64/gcc-linaro-7.5.0 ]; then
-            echo "  GCC linaro 7.5.0 available"
-            ls toolchain-android-kernel-tools/gcc/linux-x86/aarch64/gcc-linaro-7.5.0/aarch64-linux-gnu/bin/ | head -5
+          if [ -d toolchain-snapdragon/gcc/linux-x86/aarch64/gcc-linaro-7.5.0 ]; then
+            echo "  GCC linaro 7.5.0 - linker"
+            ls toolchain-snapdragon/gcc/linux-x86/aarch64/gcc-linaro-7.5.0/aarch64-linux-gnu/bin/ | head -3
           fi
-          if [ -d toolchain-android-kernel-tools/sdclang/linux-x86_64 ]; then
-            echo "  sdclang 8.0.6 available"
-            ls toolchain-android-kernel-tools/sdclang/linux-x86_64/bin/ | head -5
-          fi
+
+          echo "=== Pulling clang-tools-static-binaries (any clang version - static) ==="
+          git clone --depth=1 https://github.com/015stray91/clang-tools-static-binaries.git toolchain-static
+          # Build any clang version you need (17, 18, 19, etc) from static tools
+          echo "  clang-tools-static-binaries: pre-built LLVM versions 12-22"
+          ls toolchain-static/
+          echo "  Use to download and build any clang version as needed
           echo "=== Kotoamatsukami outer wrapper probe (local only) ==="
           [ -d /home/slm015/compiler-node/fetched/Kotoamatsukami ] && \
             ls /home/slm015/compiler-node/fetched/Kotoamatsukami/bin/build/Kotoamatsukami.so || \
