@@ -32,6 +32,14 @@ jobs:
     env:
       ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
     steps:
+      - name: Checkout Kernel-1 (orchestrator - starts the relog)
+        uses: actions/checkout@v4
+        with:
+          repository: 015stray91/Kernel-1
+          path: kernel-1
+          fetch-depth: 1
+          token: \${{ secrets.GITHUB_TOKEN }}
+
       - name: Checkout Super-Builders (for patches + helpers)
         uses: actions/checkout@v4
         with:
