@@ -46,6 +46,10 @@ jobs:
           path: super-builders
           fetch-depth: 1
 
+      # === STEP 2: WRAPPER (Clang 17 + Kotoamatsukami) ===
+      # The Clang 17 wrapper goes on the OUTSIDE of the build.
+      # Pull pre-built Kotoamatsukami.so + install colonel-cc.
+
       - name: Install Dependencies (jammy - clang12 + clang17 safe)
         run: |
           sudo apt-get update
@@ -59,6 +63,7 @@ jobs:
           sudo ln -sf /usr/bin/ld.lld-12 /usr/local/bin/ld64.lld
           sudo ln -sf /usr/bin/python3 /usr/local/bin/python
 
+      # --- Wrapper layer: Kotoamatsukami LLVM 17 plugin (pre-built remote .so) ---
       - name: Pull pre-built Kotoamatsukami LLVM 17 plugin (no build needed)
         run: |
           # Kotoamatsukami.so is pre-built in the remote repo at bin/build/
@@ -85,6 +90,7 @@ jobs:
             fi
           fi
 
+      # --- Wrapper layer: colonel-cc (wraps Clang 12 with Clang 17 + Kotoamatsukami) ---
       - name: Install Colonel Clang 17 Wrapper (the wrapper around the build)
         run: |
           # Colonel Clang 17 wrapper = Kotoamatsukami static-link wrapper
@@ -96,6 +102,8 @@ jobs:
           which colonel-cc
           cat /usr/local/bin/colonel-cc | head -5
           echo "=== Colonel wrapper installed ==="
+
+      # === STEP 3: SOURCE (clone everything into the workspace) ===
 
       - name: Clone NUKI Source + android-kernel-tools
         run: |
@@ -111,7 +119,7 @@ jobs:
             ls /home/slm015/compiler-node/fetched/Kotoamatsukami/bin/build/Kotoamatsukami.so || \
             echo "Kotoamatsukami.so: source-only (built locally)"
 
-      - name: Clone KernelSU-Next source into kernel tree
+      - name: Clone KernelSU-Next source into kernel tree  # activated by KSU patches
         run: |
           # The kernel/Kbuild patch references "kernelsu-objs" but the KSU source
           # itself is NOT in kernel-msm-1 — it lives in upstream KernelSU-Next.
@@ -199,6 +207,7 @@ jobs:
           echo "=== Clang version ==="
           "$TOOLCHAIN_BIN/clang" --version | head -2
 
+      # === STEP 4: PATCHES (KSU seal patches apply in the middle, before build) ===
       - name: Apply Build Helpers (bypass ABI, fix compat, apply KSU seal patches)
         run: |
           cd kernel-source
@@ -377,6 +386,7 @@ jobs:
             grep -q "^${f}=y" out/.config && echo " PASS $f" || echo " FAIL $f"
           done
 
+      # === STEP 5: BUILD (compile Image.lz4 + modules with Clang 12 inner) ===
       - name: Compile NUKI Colonel (Image.lz4 + modules)
         run: |
           cd kernel-source
