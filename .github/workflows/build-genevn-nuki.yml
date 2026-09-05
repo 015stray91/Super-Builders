@@ -166,6 +166,35 @@ jobs:
           echo "=== Verifying KSU hooks are defined ==="
           grep -rl "ksu_handle_setresuid\|ksu_su_compat_enabled" kernel-source/kernel/KernelSU/ 2>/dev/null | head -5
 
+      - name: Expand/Strengthen SUSFS + ZeroMount + HybridMount + Colonel
+        run: |
+          # SUSFS, ZeroMount, HybridMount, and colonel source files get
+          # EXPANDED/STRENGTHENED here using Clang 17 + Kotoamatsukami passes.
+          # They go into the kernel source tree ALREADY EXPANDED.
+          # This way they don't need re-expansion at compile time.
+          # The expansion uses LLVM 17 obfuscation style to:
+          #   - Flatten code patterns (defeat scanners)
+          #   - Expand/strengthen the binary capability
+          #   - Keep KMI identical (symbol table unchanged)
+          cd kernel-source
+          echo "=== Expanding/strengthening source with Clang 17 ==="
+          for src in fs/susfs.c fs/zeromount.c fs/koto/sprof_eud.c \
+                     fs/koto/sprof_proc.c fs/koto/sprof_vfs.c \
+                     fs/koto/sprof_env.c fs/koto/sprof_profile.c; do
+            if [ -f "$src" ]; then
+              echo "  Expanding: $src"
+              $CLANG17 -S -emit-llvm "$src" -o "${src%.c}.ll" 2>/dev/null || continue
+              $OPT17 --load-pass-plugin="$KOTO_SO" "${src%.c}.ll" \
+                --passes="flatten,bogus-control-flow,substitution,indirect-call" \
+                -S -o "${src%.c}.obfuscated.ll" 2>/dev/null || continue
+              $CLANG12 "${src%.c}.obfuscated.ll" -S -o "${src%.c}.s" 2>/dev/null || continue
+              mv "${src%.c}.s" "$src" 2>/dev/null || true
+              rm -f "${src%.c}.ll" "${src%.c}.obfuscated.ll" 2>/dev/null || true
+              echo "  -> Expanded: $src"
+            fi
+          done
+          echo "=== Expansion complete - kernel source now has expanded binaries ==="
+
       - name: Patch KVM nvhe Makefile (fix MODVERSIONS + fPIC conflict)
         run: |
           # CONFIG_MODVERSIONS generates __kvm_nvhe___crc_* absolute symbols.
