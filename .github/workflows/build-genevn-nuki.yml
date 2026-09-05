@@ -1,670 +1,130 @@
-name: AnyRealm NUKI Colonel - Moto G Stylus 5G 2023 (SM6450 parrot)
-
-# NUKI Colonel = Native Unified Kernel Image, Colonel variant
-# NURFS = Native Unified RootFS (Debian-blended userland)
-# Fully decoupled from upstream parrot/moto/waipio GKI inheritance.
-# No vendor DLKM, no GKI 2.0, no compliance fallbacks.
-# Mirrors /mnt/sda2/kernel-msm-1/build.config.anyrealm.kernel exactly.
-#
-# CLANG 17 WRAPPER ENGINE:
-# The Colonel Clang 17 wrapper is at the START of the build pipeline.
-# It uses Clang 17 as a frontend that calls Kotoamatsukami LLVM-17 passes
-# to flatten code, defeat scanners, and preserve KMI.
-# Clang 12 is the inner compiler (matches in-tree snapdragon toolchain).
-#
-# FLAGS = Logic | C/H Files = Movement | DISC = Proof | PATCH = Seal
+name: AnyRealm NUKI Colonel
 
 on:
-  push:
-    branches: [ main, master, 015stray91 ]
   workflow_dispatch:
     inputs:
       kernel_branch:
-        description: "kernel-msm-1 "
-        default: "android-14-release-u1tgns34.42-86-2-32"
-        type: string
+        description: 'Kernel branch'
+        default: 'android-14-release-u1tgns34.42-86-2-32'
+        required: true
+
+env:
+  KERNEL_REPO: 015stray91/kernel-msm-1
+  TOOLCHAIN_REPO: 015stray91/android-kernel-tools
+  LADDER_REPO: 015stray91/clang-tools-static-binaries
+  KOTO_REPO: 015stray91/Kotoamatsukami
+  SB_REPO: 015stray91/Super-Builders
 
 jobs:
   build:
-    name: "AnyRealm NUKI Colonel - Genevn SM6450"
     runs-on: ubuntu-22.04
-    timeout-minutes: 120
-    env:
-      ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
     steps:
-      - name: Checkout Kernel-1 (orchestrator - starts the relog)
-        uses: actions/checkout@v4
-        with:
-          repository: 015stray91/Kernel-1
-          path: kernel-1
-          fetch-depth: 1
-          token: \${{ secrets.GITHUB_TOKEN }}
+      - name: Clone all repos
+        run: |
+          mkdir -p sources/{kernel,toolchain,ladder,koto,patches}
+          cd sources
+          
+          git clone --depth=1 --branch ${{ inputs.kernel_branch }} \
+            https://github.com/${{ env.KERNEL_REPO }}.git kernel
+          
+          git clone --depth=1 \
+            https://github.com/${{ env.TOOLCHAIN_REPO }}.git toolchain
+          
+          git clone --depth=1 \
+            https://github.com/${{ env.LADDER_REPO }}.git ladder
+          
+          git clone --depth=1 \
+            https://github.com/${{ env.KOTO_REPO }}.git koto
+          
+          git clone --depth=1 --branch 015stray91 \
+            https://github.com/${{ env.SB_REPO }}.git patches
+          
+          ls sources/
 
-      - name: Checkout Super-Builders (for patches + helpers)
-        uses: actions/checkout@v4
-        with:
-          path: super-builders
-          fetch-depth: 1
-
-      # === STEP 2: WRAPPER (Clang 17 + Kotoamatsukami) ===
-      # The Clang 17 wrapper goes on the OUTSIDE of the build.
-      # Pull pre-built Kotoamatsukami.so + install colonel-cc.
-
-      - name: Install Dependencies (jammy - clang12 + clang17 safe)
+      - name: Install deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison flex libssl-dev libelf-dev cpio kmod python3 python-is-python3 \
-            lz4 liblz4-tool libncurses-dev rsync zip curl wget make device-tree-compiler \
-            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu lld-12 llvm-12 clang-12 \
-            llvm-17 clang-17 lld-17 cmake ninja-build git-lfs
-          # Create bare clang symlink pointing to clang-12 if not present
-          sudo ln -sf /usr/bin/clang-12 /usr/bin/clang
-          sudo ln -sf /usr/bin/ld.lld-12 /usr/local/bin/ld.lld
-          sudo ln -sf /usr/bin/ld.lld-12 /usr/local/bin/ld64.lld
-          sudo ln -sf /usr/bin/python3 /usr/local/bin/python
+          sudo apt-get install -y \
+            clang-12 llvm-12 lld-12 gcc-aarch64-linux-gnu \
+            libzstd-dev zstd lz4 liblz4-tool \
+            bc libelf-dev libssl-dev ccache \
+            kmod cpio zip unzip xz-utils
 
-      # --- Wrapper layer: Kotoamatsukami LLVM 17 plugin (pre-built remote .so) ---
-      - name: Pull pre-built Kotoamatsukami LLVM 17 plugin (no build needed)
+      - name: Setup paths (12 = baseline, 17 = expansion)
         run: |
-          # Kotoamatsukami.so is pre-built in the remote repo at bin/build/
-          # Just clone it and copy the .so - no compilation step needed
-          echo "=== Kotoamatsukami (LLVM 17 obfuscator) - pre-built pull ==="
-          git clone --depth=1 -b llvm-17-plugins https://github.com/015stray91/Kotoamatsukami.git kotoamatsukami
-          if [ -f kotoamatsukami/bin/build/Kotoamatsukami.so ]; then
-            sudo install -m 0755 kotoamatsukami/bin/build/Kotoamatsukami.so /usr/local/lib/
-            echo "Kotoamatsukami.so installed from remote pre-built copy"
-            file /usr/local/lib/Kotoamatsukami.so
-          else
-            echo "WARNING: Kotoamatsukami.so not in remote - building from source"
-            cd kotoamatsukami
-            mkdir -p build && cd build
-            if [ -f /usr/lib/llvm-17/lib/cmake/llvm/LLVMConfig.cmake ]; then
-              LLVM_DIR=/usr/lib/llvm-17/lib/cmake/llvm
-            else
-              LLVM_DIR=/usr/lib/cmake/llvm-17
-            fi
-            cmake -G Ninja -DLLVM_DIR="$LLVM_DIR" -DCMAKE_BUILD_TYPE=Release .. 2>&1 | tail -5
-            ninja -j$(nproc) 2>&1 | tail -5
-            if [ -f Kotoamatsukami.so ]; then
-              sudo install -m 0755 Kotoamatsukami.so /usr/local/lib/
-            fi
-          fi
+          # Clang 12 (snapdragon) = inner compiler, KMI
+          export PATH="$(pwd)/sources/toolchain/clang/host/linux-x86/clang-r416183b/bin:$PATH"
+          export CROSS_COMPILE="$(pwd)/sources/toolchain/gcc/linux-x86/aarch64/gcc-linaro-7.5.0/bin/aarch64-linux-gnu-"
+          
+          # Clang 17 (ladder) = outer, pre-processes/expands source
+          export CLANG17="$(pwd)/sources/ladder/llvm-binaries/llvm-17/bin"
+          export KOTO_SO="$(pwd)/sources/koto/colonel/build/Kotoamatsukami.so"
+          
+          echo "=== Ready ==="
+          clang --version | head -1
+          $CLANG17/clang --version 2>/dev/null | head -1 || echo "LLVM 17: need build"
+          ls $KOTO_SO 2>/dev/null || echo "Koto.so: need build"
 
-      # --- Wrapper layer: colonel-cc (wraps Clang 12 with Clang 17 + Kotoamatsukami) ---
-      - name: Install Colonel Clang 17 Wrapper (the wrapper around the build)
+      - name: Expand source (Clang 17 → Clang 12)
         run: |
-          # Colonel Clang 17 wrapper = Kotoamatsukami static-link wrapper
-          # This wraps Clang 12 with Clang 17 to flatten code, defeat scanners
-          # FLAGS = Logic | C/H Files = Movement | DISC = Proof | PATCH = Seal
-          echo "=== Installing Colonel Clang 17 wrapper ==="
-          sudo install -m 0755 super-builders/colonel/toolchain/build_static.sh /usr/local/bin/colonel-cc
-          sudo install -m 0755 super-builders/colonel/toolchain/clang_wrapper_static.sh /usr/local/bin/colonel-wrapper
-          which colonel-cc
-          cat /usr/local/bin/colonel-cc | head -5
-          echo "=== Colonel wrapper installed ==="
-
-      # === STEP 3: SOURCE (clone everything into the workspace) ===
-
-      - name: Clone NUKI Source (kernel-msm-1 + snapdragon toolchain)
-        run: |
-          BRANCH="${{ inputs.kernel_branch }}"
-          [ -z "$BRANCH" ] && BRANCH="android-14-release-u1tgns34.42-86-2-32"
-          echo "Cloning kernel source $BRANCH"
-          git clone --depth=1 -b "$BRANCH" https://github.com/015stray91/kernel-msm-1.git kernel-source
-          # In-tree snapdragon toolchain (Clang 12 + GCC) lives in kernel-source
-          echo "=== In-tree toolchain (snapdragon) ==="
-          ls kernel-source/tools/toolchains/snapdragon-toolchain/
-
-      - name: Pull toolchains (snapdragon + clang-tools-static-binaries)
-        run: |
-          # BLEND: snapdragon-toolchain + clang-tools-static-binaries
-          #
-          # Forward-porting ladder (start at 12, work UP to 17):
-          #   12 = baseline (KMI compiler)
-          #   13 = first test
-          #   14 = if 13 fails
-          #   15 = if 14 fails
-          #   16 = if 15 fails
-          #   17 = target (outer wrapper for expansion)
-          #
-          # If a version fails, drop down one. The static tools give us
-          # any version pre-built - no local compile.
-          #
-          # snapdragon = Clang 12 (inner, KMI matching)
-          # clang-tools-static = Clang 13/14/15/16/17/18... (outer ladder)
-          echo "=== Pulling snapdragon-toolchain (Clang 12 - baseline/KMI) ==="
-          git clone --depth=1 https://github.com/015stray91/android-kernel-tools.git toolchain-snapdragon
-          if [ -d toolchain-snapdragon/clang/host/linux-x86/clang-r416183b ]; then
-            echo "  Clang 12 (clang-r416183b) - KMI matching compiler (start point)"
-            ls toolchain-snapdragon/clang/host/linux-x86/clang-r416183b/bin/ | head -5
-          fi
-          if [ -d toolchain-snapdragon/gcc/linux-x86/aarch64/gcc-linaro-7.5.0 ]; then
-            echo "  GCC linaro 7.5.0 - linker"
-            ls toolchain-snapdragon/gcc/linux-x86/aarch64/gcc-linaro-7.5.0/aarch64-linux-gnu/bin/ | head -3
-          fi
-
-          echo "=== Pulling clang-tools-static-binaries (ladder versions) ==="
-          git clone --depth=1 https://github.com/015stray91/clang-tools-static-binaries.git toolchain-static
-          echo "  clang-tools-static-binaries: pre-built LLVM versions 12-22"
-          ls toolchain-static/
-          echo "  Ladder: 12 -> 13 -> 14 -> 15 -> 16 -> 17 (target)"
-          echo "  Each version static-linked - no compile needed"
-
-          # Download official pre-built LLVM 12-17 to /tmp/clang-static-versions/
-          # This populates the ladder: 12 (baseline) up to 17 (target)
-          echo "=== Cloning pre-built ladder (llvm-binaries/) ==="
-          # All 6 versions (12-17) pre-built by CI, committed to repo directory
-          # clang-tools-static-binaries/.github/workflows/prebuild-ladder.yml
-          # Binaries are in: llvm-binaries/llvm-{version}/bin/
-          # Just clone, they're already there. No env vars, no artifact download.
-          git clone --depth=1 \
-            https://github.com/015stray91/clang-tools-static-binaries.git \
-            toolchain-ladder
-          if [ -d toolchain-ladder/llvm-binaries ]; then
-            echo "  Pre-built ladder available:"
-            ls toolchain-ladder/llvm-binaries/ | head -10
-          fi
-          echo "=== Kotoamatsukami outer wrapper probe (local only) ==="
-          [ -d /home/slm015/compiler-node/fetched/Kotoamatsukami ] && \
-            ls /home/slm015/compiler-node/fetched/Kotoamatsukami/bin/build/Kotoamatsukami.so || \
-            echo "Kotoamatsukami.so: source-only (built locally)"
-
-      - name: Clone KernelSU-Next source into kernel tree  # activated by KSU patches
-        run: |
-          # The kernel/Kbuild patch references "kernelsu-objs" but the KSU source
-          # itself is NOT in kernel-msm-1 — it lives in upstream KernelSU-Next.
-          # Pin commit from android12-5.10/KernelSU-Next/kernelsu-next-pin.txt
-          KSU_PIN="095f780bf8835e92b51d06fce4afe7733f86a64c"
-          KSU_REPO="https://github.com/KernelSU-Next/KernelSU-Next.git"
-          echo "=== Cloning KernelSU-Next @ $KSU_PIN ==="
-          git clone --filter=blob:none --no-checkout "$KSU_REPO" /tmp/ksu-source
-          (cd /tmp/ksu-source && git fetch --depth=1 origin "$KSU_PIN" && git checkout FETCH_HEAD)
-          echo "=== KernelSU-Next contents ==="
-          ls /tmp/ksu-source/
-          echo "=== Copying KernelSU into kernel-source/kernel/KernelSU ==="
-          mkdir -p kernel-source/kernel/KernelSU
-          cp -r /tmp/ksu-source/kernel/. kernel-source/kernel/KernelSU/
-          echo "=== Copying KernelSU uapi headers into kernel-source ==="
-          cp -r /tmp/ksu-source/uapi kernel-source/kernel/KernelSU/
-          echo "=== Removing duplicate Makefile (use kernel-source build) ==="
-          rm -f kernel-source/kernel/KernelSU/Makefile
-          echo "=== Adding obj-y += KernelSU/ to kernel/Makefile ==="
-          if ! grep -q "obj-y.*+=.*KernelSU" kernel-source/kernel/Makefile; then
-            echo "obj-y += KernelSU/" >> kernel-source/kernel/Makefile
-          fi
-          echo "=== Verify KernelSU source is present ==="
-          ls kernel-source/kernel/KernelSU/
-          echo "=== Verifying KSU hooks are defined ==="
-          grep -rl "ksu_handle_setresuid\|ksu_su_compat_enabled" kernel-source/kernel/KernelSU/ 2>/dev/null | head -5
-
-      - name: Expand/Strengthen SUSFS + ZeroMount + HybridMount + Colonel
-        run: |
-          # SUSFS, ZeroMount, HybridMount, and colonel source files get
-          # EXPANDED/STRENGTHENED here using Clang 17 + Kotoamatsukami passes.
-          # The styling/expansion functions get taught/assigned to those binaries.
-          # Then KMI registers them (preserved symbol table) so the kernel can link them.
-          # Flow per file:
-          #   1. Clang 17 emits LLVM IR (.ll) with styling/expansion applied
-          #   2. opt-17 + Kotoamatsukami flattens/expands the IR
-          #   3. Clang 12 emits assembly (.s) with IDENTICAL symbol table (KMI)
-          #   4. Kernel Makefile links them in
-          # Result: expanded binaries, same KMI, scanned-but-not-flagged code
-          cd kernel-source
-          echo "=== Expanding/strengthening source with Clang 17 ==="
-          for src in fs/susfs.c fs/zeromount.c fs/koto/sprof_eud.c \
-                     fs/koto/sprof_proc.c fs/koto/sprof_vfs.c \
-                     fs/koto/sprof_env.c fs/koto/sprof_profile.c; do
-            if [ -f "$src" ]; then
-              echo "  Expanding: $src"
-              $CLANG17 -S -emit-llvm "$src" -o "${src%.c}.ll" 2>/dev/null || continue
-              $OPT17 --load-pass-plugin="$KOTO_SO" "${src%.c}.ll" \
-                --passes="flatten,bogus-control-flow,substitution,indirect-call" \
-                -S -o "${src%.c}.obfuscated.ll" 2>/dev/null || continue
-              $CLANG12 "${src%.c}.obfuscated.ll" -S -o "${src%.c}.s" 2>/dev/null || continue
-              mv "${src%.c}.s" "$src" 2>/dev/null || true
-              rm -f "${src%.c}.ll" "${src%.c}.obfuscated.ll" 2>/dev/null || true
-              echo "  -> Expanded: $src"
-            fi
-          done
-          echo "=== Expansion complete - kernel source now has expanded binaries ==="
-
-      - name: Patch KVM nvhe Makefile (fix MODVERSIONS + fPIC conflict)
-        run: |
-          # CONFIG_MODVERSIONS generates __kvm_nvhe___crc_* absolute symbols.
-          # The KVM nvhe hypervisor code is compiled -fPIC and cannot use
-          # absolute 32-bit relocations. Remove CRC generation for nvhe objects.
-          M=kernel-source/arch/arm64/kvm/hyp/nvhe/Makefile
-          if ! grep -q "CFLAGS_REMOVE_page.nvhe.o.*KCRCTAB" "$M"; then
-            echo >> "$M"
-            echo "# Prevent MODVERSIONS CRCs from breaking KVM nvhe -fPIC binary" >> "$M"
-            echo "CFLAGS_REMOVE_page.nvhe.o     := \$(filter-out \$(KCRCTAB), \$(CFLAGS))" >> "$M"
-            echo "CFLAGS_REMOVE_memcpy.nvhe.o   := \$(filter-out \$(KCRCTAB), \$(CFLAGS))" >> "$M"
-            echo "CFLAGS_REMOVE_memset.nvhe.o   := \$(filter-out \$(KCRCTAB), \$(CFLAGS))" >> "$M"
-            echo "=== KVM nvhe MODVERSIONS fix applied ==="
-            tail -5 "$M"
-          else
-            echo "KVM nvhe MODVERSIONS fix already present"
-          fi
-
-      - name: Patch Header Stubs (fix duplicate-symbol linker errors)
-        run: |
-          # Fix include/linux/usb/dwc3-msm.h #else stubs missing 'static':
-          # Both drivers/phy/phy-msm-ssusb-qmp.c and drivers/phy/phy-msm-snps-hs.c
-          # include this header; the non-static stubs cause duplicate-symbol errors.
-          # All 6 functions below are ONLY in the #else block — sed patterns are safe.
-          H=kernel-source/include/linux/usb/dwc3-msm.h
-          sed -i 's/^void dwc3_msm_notify_event(struct dwc3 \*dwc,/static inline void dwc3_msm_notify_event(struct dwc3 *dwc,/' "$H"
-          sed -i 's/^int msm_ep_update_ops(struct usb_ep \*ep)$/static inline int msm_ep_update_ops(struct usb_ep *ep)/' "$H"
-          sed -i 's/^int msm_ep_clear_ops(struct usb_ep \*ep)$/static inline int msm_ep_clear_ops(struct usb_ep *ep)/' "$H"
-          sed -i 's/^int msm_ep_set_mode(struct usb_ep \*ep, enum usb_hw_ep_mode mode)$/static inline int msm_ep_set_mode(struct usb_ep *ep, enum usb_hw_ep_mode mode)/' "$H"
-          sed -i 's/^inline int dwc3_core_stop_hw_active_transfers(struct dwc3 \*dwc)/static inline int dwc3_core_stop_hw_active_transfers(struct dwc3 *dwc)/' "$H"
-          sed -i 's/^inline int dwc3_msm_set_usb_redriver_eq(struct device \*dev)/static inline int dwc3_msm_set_usb_redriver_eq(struct device *dev)/' "$H"
-          # Fix drivers/remoteproc/qcom_common.h #else stub missing 'static':
-          # qcom_sysmon_get_reason is only in the #else block — all includers re-emit it.
-          sed -i 's/^int qcom_sysmon_get_reason(struct qcom_sysmon \*sysmon, char \*buf, size_t len)/static inline int qcom_sysmon_get_reason(struct qcom_sysmon *sysmon, char *buf, size_t len)/' \
-            kernel-source/drivers/remoteproc/qcom_common.h
-          echo "=== Header stubs patched ==="
-          grep -n "^static inline" "$H" | head -10
-          grep -n "^static inline" kernel-source/drivers/remoteproc/qcom_common.h | head -5
-
-      - name: Setup In-Tree Toolchain (force clang-12 from llvm-12 package)
-        run: |
-          # The CI runner's Ubuntu image has bare /usr/bin/clang as clang-14.
-          # Force /usr/bin/clang -> clang-12 from the start.
-          sudo ln -sf /usr/bin/clang-12 /usr/bin/clang
-          TOOLCHAIN_BIN=kernel-source/tools/toolchains/snapdragon-toolchain/clang-r416183b/bin
-          mkdir -p "$TOOLCHAIN_BIN"
-          for tool in clang ld.lld llvm-ar llvm-nm llvm-objcopy llvm-objdump llvm-strip llvm-readelf; do
-            if [ -e /usr/bin/$tool-12 ]; then
-              sudo ln -sf /usr/bin/$tool-12 "$TOOLCHAIN_BIN/$tool"
-              echo "  -> $tool = /usr/bin/$tool-12"
-            elif [ -e /usr/bin/$tool ]; then
-              sudo ln -sf /usr/bin/$tool "$TOOLCHAIN_BIN/$tool"
-              echo "  -> $tool = /usr/bin/$tool"
-            fi
-          done
-          echo "=== Toolchain binaries ==="
-          ls -la "$TOOLCHAIN_BIN/" | head -10
-          echo "=== Clang version ==="
-          "$TOOLCHAIN_BIN/clang" --version | head -2
-
-      # === STEP 4: PATCHES (KSU seal patches apply in the middle, before build) ===
-      - name: Apply Build Helpers (bypass ABI, fix compat, apply KSU seal patches)
-        run: |
-          cd kernel-source
-          # In CI, the Super-Builders repo is checked out at $GITHUB_WORKSPACE/super-builders
-          # (a subdirectory named 'super-builders' under the default workflow name).
-          # So from kernel-source/, paths are:
-          #   ../../android12-5.10/build-helpers/
-          #   ../../android12-5.10/KernelSU-Next/patches/    (NOTE: 'patches', not 'Ksu-patches')
-          # NUKI Colonel is android12 (5.10.233) per device's last A12 update.
-          # From kernel-source/ (= GITHUB_WORKSPACE/super-builders/kernel-source/):
-          #   ../                   = GITHUB_WORKSPACE/super-builders/ (Super-Builders repo root)
-          #   ../android12-5.10/   = helpers & patches
-          HELPER="../android12-5.10/build-helpers"
-          KSU_PATCHES="../android12-5.10/KernelSU-Next/patches"
-          SUBLEVEL=$(grep "^SUBLEVEL =" Makefile | head -1 | awk '{print $3}')
-
-          # 1) bypass-oem-abi: strips GKI protected_exports, disables TRIM in gki_defconfig
-          if [ -f "$HELPER/bypass-oem-abi.sh" ]; then
-            echo "=== bypass-oem-abi ==="
-            bash "$HELPER/bypass-oem-abi.sh"
-          else
-            echo "bypass-oem-abi.sh not found at $HELPER - skipping"
-          fi
-
-          # 2) bypass-abi-check: patches ABI check scripts for android12-5.10
-          if [ -f "$HELPER/bypass-abi-check.sh" ]; then
-            echo "=== bypass-abi-check (android12 5.10) ==="
-            bash "$HELPER/bypass-abi-check.sh" . android12 5.10
-          fi
-
-          # 3) fix-old-kernel-compat: pre-patch vanilla kernel fixes (sublevel-aware)
-          if [ -f "$HELPER/fix-old-kernel-compat.sh" ]; then
-            echo "=== fix-old-kernel-compat (sublevel=$SUBLEVEL) ==="
-            bash "$HELPER/fix-old-kernel-compat.sh" . "$SUBLEVEL"
-          fi
-
-           # 4) Apply KSU seal patches (real source diffs from Super-Builders)
-           #    Kernel already has SUSFS integrated - dry-run first to avoid .rej files
-            if [ -d "$KSU_PATCHES" ]; then
-              echo "=== Apply patches (KSU seal, dry-run first) ==="
-              for patch in "$KSU_PATCHES"/*.patch; do
-                [ -f "$patch" ] || continue
-                # Dry-run: check if patch applies cleanly before touching anything
-                if patch -p1 --dry-run --forward < "$patch" 2>&1 | grep -q "Reversed (or previously applied) patch detected!"; then
-                  echo "  = $(basename $patch) already applied, skipping"
-                elif patch -p1 --dry-run --forward < "$patch" 2>&1 | grep -q "Hunk #1 succeeded at"; then
-                  # At least some hunks apply - apply with -N (forward only, don't re-apply)
-                  echo "  -> $(basename $patch) (partial apply)"
-                  patch -p1 -F3 --forward < "$patch" || echo "  ! $(basename $patch) partial hunks (checking .rej files)"
-                  # Clean up any .rej files that could poison the build
-                  find . -name "*.rej" -delete && echo "  cleaned .rej files"
-                else
-                  echo "  = $(basename $patch) not applicable, skipping"
-                fi
-              done
-            else
-              echo "patches not found at $KSU_PATCHES - skipping"
-            fi
-
-           # 5) fix-susfs-compat: post-patch runtime compatibility fixes
-          #    (show_pad label, inotify_mark_user_mask, i_uid_into_mnt, etc.)
-          if [ -f "$HELPER/fix-susfs-compat.sh" ]; then
-            echo "=== fix-susfs-compat (sublevel=$SUBLEVEL) ==="
-            bash "$HELPER/fix-susfs-compat.sh" . "$SUBLEVEL" android12 5.10
-          fi
-
-          # 6) setup-bbg: BBG (BusyBox Garden) NetHunter userspace setup
-          if [ -f "$HELPER/setup-bbg.sh" ]; then
-            echo "=== setup-bbg ==="
-            bash "$HELPER/setup-bbg.sh" || echo "  setup-bbg returned non-zero (continuing)"
-          fi
-
-      - name: Use Pre-Merged NUKI Colonel .config
-        run: |
-          cd kernel-source
-          # Nuke any stale out/ from a previous run (different branch/source
-          # can leave .o files that duplicate-current-source symbols on link).
-          rm -rf out
-          mkdir -p out
-          # The merged NUKI Colonel .config is committed to kernel-msm-1 root
-          # (nuki-colonel.config). It contains all 7 pillars merged by
-          # merge_nuki.py, with critical flags (FUNCTION_TRACER, DYNAMIC_FTRACE,
-          # KERNEL_LZ4) injected and GKI abi_symbollist path cleared.
-          if [ -f nuki-colonel.config ]; then
-            cp nuki-colonel.config out/.config
-            echo "=== Used committed nuki-colonel.config ==="
-            echo "  $(grep -c '^CONFIG_' out/.config) CONFIGs, $(grep -c '^#' out/.config) comments"
-          else
-            echo "ERROR: nuki-colonel.config missing in kernel-source root"
-            exit 1
-          fi
-
-          # LZ4 NEON deployment (kernel Colonel compression, from deploy_lz4.sh)
-          [ -f deploy_lz4.sh ] && chmod +x deploy_lz4.sh && ./deploy_lz4.sh || echo "no deploy_lz4.sh"
-
-          # Post-process .config: disable problematic GKI options and fix sparse-config issues
-          # - WERROR: causes build failures on minor warnings
-          # - SYSTEM_TRUSTED_KEYRING: needs debian/canonical-certs.pem (not in tree)
-          # - KERNEL_MODE_NEON: LZ4 ARM64 NEON path is broken (deploy_lz4.sh provides alt)
-          # - TRIM_UNUSED_KSYMS: disabled via ksu-nh.defconfig
-          # - QCOM_SMEM: needed by soc_sleep_stats subsystem array
-          # - SCHED_WALT: needed by QCOM DCVS (core_ctl_notif_data struct)
-          echo "=== Post-process .config ==="
-          sed -i 's/^CONFIG_WERROR=y/# CONFIG_WERROR is not set/' out/.config
-          sed -i 's/^CONFIG_SYSTEM_TRUSTED_KEYRING=y/# CONFIG_SYSTEM_TRUSTED_KEYRING is not set/' out/.config
-          sed -i 's|^CONFIG_SYSTEM_TRUSTED_KEYS=.*|CONFIG_SYSTEM_TRUSTED_KEYS=""|' out/.config
-          sed -i 's|^CONFIG_SYSTEM_REVOCATION_KEYS=.*|CONFIG_SYSTEM_REVOCATION_KEYS=""|' out/.config
-          # Squashfs files removed above. Keep LTO enabled via ThinLTO (not FullLTO).
-          # ThinLTO processes modules in parallel shards without aggressive cross-TU optimization,
-          # preventing KVM hypervisor LLD plugin conflicts while still resolving duplicate symbols.
-          # Disable KERNEL_MODE_NEON (broken LZ4 ARM64 NEON path - deploy_lz4.sh provides alt).
-          # Remove problematic squashfs files causing duplicate symbol errors.
-          # decompressor_single.c and decompressor_multi_percpu.c both define global
-          # squashfs_decompressor_create/destroy/decompress/max_decompressors.
-          # NUKI Colonel doesn't use squashfs for file caching. Just delete them.
-          rm -f fs/squashfs/file_cache.c \
-                fs/squashfs/file_direct.c \
-                fs/squashfs/page_actor.c \
-                fs/squashfs/decompressor_single.c \
-                fs/squashfs/decompressor_multi.c \
-                fs/squashfs/decompressor_multi_percpu.c
-          # Remove corresponding entries from Makefile
-          sed -i '/file_cache\.o\|file_direct\.o\|page_actor\.o\|decompressor_single\.o\|decompressor_multi\.o\|decompressor_multi_percpu\.o/d' fs/squashfs/Makefile
-          # Disable KERNEL_MODE_NEON (broken LZ4 ARM64 NEON path - deploy_lz4.sh provides alt).
-          # Switch to ThinLTO (not FullLTO) - processes modules in parallel shards without
-          # destructive cross-TU optimization that breaks KVM LLD plugin pass.
-          # ThinLTO still resolves duplicate symbols (qcom_common, dwc3, soc_sleep_stats).
-          sed -i 's/^CONFIG_KERNEL_MODE_NEON=y/# CONFIG_KERNEL_MODE_NEON is not set/' out/.config
-          sed -i 's/^CONFIG_LTO_CLANG_FULL=y/# CONFIG_LTO_CLANG_FULL is not set/' out/.config
-          grep -q "^# CONFIG_LTO_CLANG_THIN is not set" out/.config && \
-            sed -i 's/^# CONFIG_LTO_CLANG_THIN is not set/CONFIG_LTO_CLANG_THIN=y/' out/.config || true
-          # CIFS_SMBD conflicts with cifs_listxattr (cifsfs.h #define cifs_listxattr NULL
-          # when SMBD is on, then xattr.c redefines function = syntax error)
-          sed -i 's/^CONFIG_CIFS_SMBD=y/# CONFIG_CIFS_SMBD is not set/' out/.config
-          # CIFS itself has a CONFIG_CIFS_XATTR sub-define that breaks when y.
-          # Disable CIFS entirely (we don't need it; NURFS uses other FS layers)
-          sed -i 's/^CONFIG_CIFS=y/# CONFIG_CIFS is not set/' out/.config
-          # Also disable CIFS_XATTR sub-option (kconfig default is Y if unsure)
-          # Kconfig's silentoldconfig uses defaults; we need to set N explicitly
-          if ! grep -q "^# CONFIG_CIFS_XATTR is not set" out/.config; then
-            echo "# CONFIG_CIFS_XATTR is not set" >> out/.config
-          fi
-          if ! grep -q "^# CONFIG_CIFS is not set" out/.config; then
-            sed -i 's/^# CONFIG_CIFS is not set/# CONFIG_CIFS is not set\n# CONFIG_CIFS_XATTR is not set/' out/.config
-          fi
-          # QCOM_SUBSYSTEM_SLEEP_STATS and QCOM_SOC_SLEEP_STATS both define global
-          # 'ddr_freq_update' bool - linker fails with duplicate symbol. Disable the
-          # SUBSYSTEM variant (SOC variant is the primary one for SM6450).
-          sed -i 's/^CONFIG_QCOM_SUBSYSTEM_SLEEP_STATS=y/# CONFIG_QCOM_SUBSYSTEM_SLEEP_STATS is not set/' out/.config
-          # USB_DWC3_MSM: when disabled, dwc3-msm.h's #else stubs (msm_ep_update_ops,
-          # dwc3_msm_notify_event, etc.) lack 'static' — both phy-msm-ssusb-qmp.o and
-          # phy-msm-snps-hs.o define them as extern, causing duplicate-symbol linker error.
-          # Enable the real driver so the stub path is skipped.
-          grep -q "^# CONFIG_USB_DWC3_MSM is not set" out/.config && \
-            sed -i 's/^# CONFIG_USB_DWC3_MSM is not set/CONFIG_USB_DWC3_MSM=y/' out/.config || true
-          # Same root cause: qcom_common.h's #else stub for CONFIG_QCOM_SYSMON
-          # defines a non-static qcom_sysmon_get_reason. Every file including
-          # the header (pdr_interface, qcom_common, qcom_q6v5*, esoc*) re-emits
-          # it. Enable QCOM_SYSMON so the header uses the extern path instead.
-          grep -q "^# CONFIG_QCOM_SYSMON is not set" out/.config && \
-            sed -i 's/^# CONFIG_QCOM_SYSMON is not set/CONFIG_QCOM_SYSMON=y/' out/.config || true
-          # Ensure QCOM_SMEM and SCHED_WALT are enabled (fixes source-level dependencies)
-          grep -q "^# CONFIG_QCOM_SMEM is not set" out/.config && \
-            sed -i 's/^# CONFIG_QCOM_SMEM is not set/CONFIG_QCOM_SMEM=y/' out/.config || true
-          grep -q "^# CONFIG_SCHED_WALT is not set" out/.config && \
-            sed -i 's/^# CONFIG_SCHED_WALT is not set/CONFIG_SCHED_WALT=y/' out/.config || true
-
-          echo "=== Final .config: $(grep -c '^CONFIG_' out/.config) CONFIGs ==="
-           for f in CONFIG_KSU CONFIG_KSU_SUSFS CONFIG_KSU_SUSFS_SUS_MOUNT CONFIG_KSU_SUSFS_HARDENED \
-                    CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS CONFIG_ZEROMOUNT CONFIG_OVERLAY_FS \
-                    CONFIG_FUSE_FS CONFIG_ZRAM CONFIG_ZSMALLOC \
-                    CONFIG_KALLSYMS CONFIG_MODULES CONFIG_MODVERSIONS CONFIG_MODULE_UNLOAD \
-                    CONFIG_ARM64 CONFIG_QCOM_EUD CONFIG_KPM CONFIG_HIDELKM \
-                    CONFIG_BINFMT_MISC CONFIG_FTRACE CONFIG_FUNCTION_TRACER \
-                    CONFIG_KERNEL_LZ4; do
-            grep -q "^${f}=y" out/.config && echo " PASS $f" || echo " FAIL $f"
+          export PATH="$(pwd)/sources/toolchain/clang/host/linux-x86/clang-r416183b/bin:$PATH"
+          export CLANG17="$(pwd)/sources/ladder/llvm-binaries/llvm-17/bin"
+          export KOTO_SO="$(pwd)/sources/koto/colonel/build/Kotoamatsukami.so"
+          cd sources/kernel
+          
+          echo "=== Expanding: SUSFS + ZeroMount + HybridMount + Colonel ==="
+          for src in fs/susfs.c fs/zeromount.c \
+                     fs/koto/sprof_eud.c fs/koto/sprof_proc.c \
+                     fs/koto/sprof_env.c fs/koto/sprof_vfs.c \
+                     fs/koto/sprof_profile.c; do
+            [ -f "$src" ] || continue
+            echo "  $src"
+            $CLANG17/clang -S -emit-llvm "$src" -o "${src%.c}.ll" 2>/dev/null || continue
+            $CLANG17/opt --load-pass-plugin="$KOTO_SO" "${src%.c}.ll" \
+              --passes="flatten,bogus-control-flow,substitution,indirect-call" \
+              -S -o "${src%.c}.ob.ll" 2>/dev/null || continue
+            clang "${src%.c}.ob.ll" -S -o "${src%.c}.s" 2>/dev/null || continue
+            mv "${src%.c}.s" "$src"
+            rm -f "${src%.c}.ll" "${src%.c}.ob.ll"
           done
 
-      # === STEP 5: BUILD (compile Image.lz4 + modules with Clang 12 inner) ===
-      - name: Compile NUKI Colonel (Image.lz4 + modules)
+      - name: Apply patches
         run: |
-          cd kernel-source
-          # Mirror build.config.anyrealm.kernel MAKE_GOALS exactly:
-          #   Image.lz4 + modules, Clang 12 inner, LLVM=1, LLVM_IAS=1
-          export ARCH=arm64
-          export SUBARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          # In-tree snapdragon clang (clang-r416183b) is missing binary blobs from depth=1 clone.
-          # Use system clang-12 from apt instead (LLVM 12.0.1 matches the snapdragon toolchain version).
-          # Set CC=clang-12 explicitly and let Makefile use it.
+          cd sources/kernel
+          for p in ../patches/*.patch; do
+            [ -f "$p" ] && patch -p1 -N < "$p" 2>/dev/null || true
+          done
+
+      - name: Configure
+        run: |
+          cd sources/kernel
+          export PATH="$(pwd)/../toolchain/clang/host/linux-x86/clang-r416183b/bin:$PATH"
+          export CROSS_COMPILE="$(pwd)/../toolchain/gcc/linux-x86/aarch64/gcc-linaro-7.5.0/bin/aarch64-linux-gnu-"
+          
+          [ -f ../patches/configs/ksu-nh.defconfig ] && \
+            cp ../patches/configs/ksu-nh.defconfig arch/arm64/configs/
+          make ksu-nh.defconfig 2>/dev/null || make lineage_parrot_defconfig
+          make olddefconfig
+
+      - name: Build (Clang 12 compiles expanded source)
+        run: |
+          cd sources/kernel
+          export PATH="$(pwd)/../toolchain/clang/host/linux-x86/clang-r416183b/bin:$PATH"
+          export CROSS_COMPILE="$(pwd)/../toolchain/gcc/linux-x86/aarch64/gcc-linaro-7.5.0/bin/aarch64-linux-gnu-"
           export LLVM=1
-          export LLVM_IAS=1
-          export CLANG_TRIPLE=aarch64-linux-gnu-
-          # Always use absolute system paths (the in-tree symlinks confuse Kconfig's
-          # compiler-existence check at olddefconfig time).
-          # Colonel Clang 17 wrapper wraps Clang 12 (the inner compiler)
-          # Clang 17 flattens code patterns, Kotoamatsukami plugin obfuscates LLVM IR
-          # Clang 12 still does the actual compilation to preserve KMI
-          export CC=/usr/local/bin/colonel-cc
-          export CLANG17_INNER=/usr/bin/clang-17
-          export CLANG12_INNER=/usr/bin/clang-12
-          export CLANG12=/usr/bin/clang-12
-          export KOTO_SO=/usr/local/lib/Kotoamatsukami.so
-          export OBFUSCATE=1
-          export OBF_PASSES="flatten,bogus-control-flow,substitution,indirect-call"
-          export LD=/usr/bin/ld.lld-12
-          export AR=/usr/bin/llvm-ar-12
-          export NM=/usr/bin/llvm-nm-12
-          export OBJCOPY=/usr/bin/llvm-objcopy-12
-          export OBJDUMP=/usr/bin/llvm-objdump-12
-          export STRIP=/usr/bin/llvm-strip-12
-          echo "Using CC=$CC"
-          "$CC" --version | head -1
+          
+          make -j$(nproc) Image.lz4 modules 2>&1 | tail -30
 
-          # Pure compile: .config already complete from merge_nuki.py - no Kconfig prompts
-          # Also export all Colonel sacred CONFIG_* from build.config.anyrealm.kernel
-          # (Parts 1-12) so kernel Makefile sees them as env vars (override .config).
-          set -a
-          # Part 1: Colonel compression & performance
-          export CONFIG_KERNEL_LZ4=y
-          export CONFIG_ZRAM=y
-          export CONFIG_ZSMALLOC=y
-          export CONFIG_ZCOMP_LZ4K=y
-          export CONFIG_CPU_FREQ_GOV_PERFORMANCE=y
-          export CONFIG_QCOM_EUD=y
-          # Part 2: KernelSU + SUSFS (sacred Colonel flags)
-          export CONFIG_KPROBES=y
-          export CONFIG_KPROBE_EVENTS=y
-          export CONFIG_KSU=y
-          export CONFIG_KSU_SUSFS=y
-          export CONFIG_KSU_SUSFS_HAS_MEM_PAGES=y
-          export CONFIG_KSU_SUSFS_SUS_MOUNT=y
-          export CONFIG_KSU_SUSFS_ZERO_MOUNT=y
-          export CONFIG_KSU_SUSFS_SPOOF_KSTAT=y
-          export CONFIG_KSU_SUSFS_SUS_KSTAT=y
-          export CONFIG_KSU_SUSFS_SUS_KSTAT_REDIRECT=y
-          export CONFIG_KSU_SUSFS_SUS_MAP=y
-          export CONFIG_KSU_SUSFS_SPOOF_UNAME=y
-          export CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
-          export CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
-          export CONFIG_KSU_SUSFS_OPENAT=y
-          export CONFIG_KSU_SUSFS_OPENAT2=y
-          export CONFIG_KSU_SUSFS_GETDENTS=y
-          export CONFIG_KSU_SUSFS_HARDENED=y
-          export CONFIG_KSU_SUSFS_HIDDEN_NAME=y
-          export CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
-          export CONFIG_KSU_SUSFS_UNICODE_FILTER=y
-          export CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
-          export CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
-          export CONFIG_KSU_SUSFS_ENABLE_LOG=y
-          export CONFIG_KSU_SUSFS_SUS_PATH=y
-          export CONFIG_KSU_SUSFS_STAT=y
-          # Part 3: ZeroMount
-          export CONFIG_ZEROMOUNT=y
-          # Part 4: OverlayFS / FUSE / TMPFS_XATTR
-          export CONFIG_OVERLAY_FS=y
-          export CONFIG_OVERLAY_FS_REDIRECT_ALWAYS_FOLLOW=y
-          export CONFIG_FUSE_FS=y
-          export CONFIG_FUSE_DAX=n
-          export CONFIG_TMPFS_XATTR=y
-          export CONFIG_TMPFS_POSIX_ACL=y
-          # Part 5: NetHunter attack module drivers
-          export CONFIG_USB_GADGET=y
-          export CONFIG_USB_CONFIGFS=y
-          export CONFIG_USB_CONFIGFS_F_HID=y
-          export CONFIG_UHID=y
-          export CONFIG_NET=y
-          export CONFIG_WIRELESS=y
-          export CONFIG_CFG80211=m
-          export CONFIG_MAC80211=m
-          export CONFIG_NL80211_TESTMODE=y
-          export CONFIG_NETFILTER=y
-          export CONFIG_IP_NF_MANGLE=y
-          export CONFIG_IP6_NF_MANGLE=y
-          # Part 6: NURFS native Linux
-          export CONFIG_BINFMT_MISC=y
-          export CONFIG_BINFMT_ELF=y
-          export CONFIG_COMPAT_BINFMT_ELF=y
-          export CONFIG_DEVTMPFS_MOUNT=y
-          export CONFIG_USER_NS=y
-          export CONFIG_IPC_NS=y
-          export CONFIG_PID_NS=y
-          export CONFIG_NET_NS=y
-          export CONFIG_CGROUP_DEVICE=y
-          export CONFIG_CGROUP_PIDS=y
-          export CONFIG_CGROUP_FREEZER=y
-          export CONFIG_CPUSETS=y
-          export CONFIG_FHANDLE=y
-          export CONFIG_EVENTFD=y
-          export CONFIG_INOTIFY_USER=y
-          export CONFIG_SIGNALFD=y
-          export CONFIG_TIMERFD=y
-          export CONFIG_EPOLL=y
-          export CONFIG_FILE_LOCKING=y
-          export CONFIG_FUTEX=y
-          export CONFIG_FUTEX2=y
-          export CONFIG_CHECKPOINT_RESTORE=y
-          export CONFIG_NAMESPACES=y
-          export CONFIG_UTS_NS=y
-          export CONFIG_MNT_NS=y
-          # Part 7: Native Linux FS (NURFS)
-          export CONFIG_CUSE=y
-          export CONFIG_SQUASHFS=y
-          export CONFIG_SQUASHFS_FILE_CACHE=y
-          export CONFIG_SQUASHFS_FILE_DIRECT=y
-          export CONFIG_SQUASHFS_DECOMP_MULTI_PERCPU=y
-          export CONFIG_NTFS_FS=y
-          export CONFIG_NTFS_RW=y
-          export CONFIG_EXFAT_FS=y
-           # INCFS has PAGE_SIZE mismatch (BUILD_BUG_ON PAGE_SIZE != 4096)
-           export CONFIG_INCREMENTAL_FS=n
-           # CIFS has cifs_listxattr conflict (cifsfs.h macro)
-           export CONFIG_CIFS=n
-           export CONFIG_CIFS_XATTR=n
-           export CONFIG_CIFS_SMBD=n
-           # FUTEX2 and ZCOMP_LZ4K not in base .config
-           export CONFIG_FUTEX2=n
-           export CONFIG_ZCOMP_LZ4K=n
-          export CONFIG_NLS=y
-          export CONFIG_NLS_CODEPAGE_437=y
-          export CONFIG_NLS_ISO8859_1=y
-          export CONFIG_NLS_UTF8=y
-          # Part 8: ZRAM compressors
-          export CONFIG_ZRAM_WRITEBACK=y
-          export CONFIG_CRYPTO_LZ4=y
-          export CONFIG_CRYPTO_ZSTD=y
-          export CONFIG_CRYPTO_LZO=y
-          export CONFIG_CRYPTO_LZ4HC=y
-          # Part 9: Required for loadable modules
-          export CONFIG_MODULES=y
-          export CONFIG_MODULE_UNLOAD=y
-          export CONFIG_MODVERSIONS=y
-          export CONFIG_KALLSYMS=y
-          # Part 10: KPM (Kernel Patch Module) - loadable .ko support
-          export CONFIG_KPM=y
-          # Part 11: HIDELKM (hide loadable modules from /proc/modules)
-          export CONFIG_HIDELKM=y
-          # Part 12: Kotoamatsukami obfuscation target (LKM ftrace hook)
-          export CONFIG_FTRACE=y
-          export CONFIG_FUNCTION_TRACER=y
-          export CONFIG_DYNAMIC_FTRACE=y
-          # Part 13: Build hygiene (prevent WERROR/COMPILE_TEST/TRIM_UNUSED_KSYMS prompts)
-          export CONFIG_WERROR=n
-          export CONFIG_COMPILE_TEST=n
-          export CONFIG_TRIM_UNUSED_KSYMS=n
-          set +a
+      - name: Package
+        run: |
+          mkdir -p artifacts
+          [ -f sources/kernel/arch/arm64/boot/Image.lz4 ] && \
+            cp sources/kernel/arch/arm64/boot/Image.lz4 artifacts/
+          find sources/kernel -name "*.ko" -exec cp {} artifacts/ \; 2>/dev/null || true
+          ls -la artifacts/
 
-            # Use olddefconfig. Pass CC/LD explicitly so the Makefile uses clang-12 not bare 'clang'.
-            yes '' | make O=out ARCH=arm64 \
-              CROSS_COMPILE=aarch64-linux-gnu- \
-              "CC=$CC" "LD=$LD" "AR=$AR" "NM=$NM" "OBJCOPY=$OBJCOPY" "OBJDUMP=$OBJDUMP" "STRIP=$STRIP" \
-              CLANG_TRIPLE=aarch64-linux-gnu- \
-              olddefconfig 2>&1 | tail -5
-
-            # Build with the fully-resolved config. -j4 to prevent OOM at 25-min mark.
-            make O=out ARCH=arm64 \
-              CROSS_COMPILE=aarch64-linux-gnu- \
-              "CC=$CC" "LD=$LD" "AR=$AR" "NM=$NM" "OBJCOPY=$OBJCOPY" "OBJDUMP=$OBJDUMP" "STRIP=$STRIP" \
-              CLANG_TRIPLE=aarch64-linux-gnu- \
-              -j4 Image.lz4 modules 2>&1 | tee ../build.log
-
-          ls -lh out/arch/arm64/boot/Image.lz4 || (echo "FAIL"; tail -100 ../build.log; exit 1)
-          mkdir -p ../modules
-          find out -name "*.ko" -exec cp {} ../modules/ \;
-          ls -lh ../modules/*.ko 2>/dev/null | head -10 || echo "no .ko modules"
-
-      - name: Upload NUKI Colonel
+      - name: Upload
         uses: actions/upload-artifact@v4
-        if: always()
         with:
-          name: AnyRealm-NUKI-Colonel-Genevn-${{ github.run_number }}
-          path: |
-            kernel-source/out/arch/arm64/boot/Image.lz4
-            kernel-source/out/arch/arm64/boot/Image
-            build.log
-            kernel-source/out/.config
-            modules/
-          compression-level: 9
-          overwrite: true
+          name: nuki-colonel-kernel
+          path: artifacts/
