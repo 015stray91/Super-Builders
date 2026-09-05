@@ -36,7 +36,7 @@ jobs:
             clang-12 llvm-12 lld-12 gcc-aarch64-linux-gnu \
             libzstd-dev zstd lz4 bc libelf-dev libssl-dev kmod cpio
 
-      - name: Shift until 12 meets 17
+      - name: Find the bridge
         run: |
           KERNEL="$(pwd)/sources/kernel"
           TOOLCHAIN="$(pwd)/sources/toolchain"
@@ -53,7 +53,7 @@ jobs:
           
           expand() {
             local VER="$1" CLANG="$2"
-            echo "  Shift: LLVM $VER..."
+            echo "  Using LLVM $VER..."
             cd "$KERNEL"
             for src in fs/susfs.c fs/zeromount.c \
                        fs/koto/sprof_eud.c fs/koto/sprof_proc.c \
@@ -75,64 +75,82 @@ jobs:
             done
           }
           
-          shift_version() {
-            local CUR="$1"
-            ((CUR--))
-            [ "$CUR" -lt 12 ] && echo "12" || echo "$CUR"
-          }
-          
-          apply_patches() {
-            cd "$KERNEL"
+          reset() {
+            git checkout -- . 2>/dev/null || true
             for p in ../patches/*.patch; do
               [ -f "$p" ] && patch -p1 -N < "$p" 2>/dev/null || true
             done
             [ -f ../patches/configs/ksu-nh.defconfig ] && \
               cp ../patches/configs/ksu-nh.defconfig arch/arm64/configs/
             make ksu-nh.defconfig 2>/dev/null || make lineage_parrot_defconfig
-            make olddefconfig
+            make olddefconfig > /dev/null 2>&1
+          }
+          
+          try() {
+            local VER="$1"
+            local CLANG="$2"
+            echo "=== Trying LLVM $VER ==="
+            reset
+            expand "$VER" "$CLANG"
+            if make -j$(nproc) Image.lz4 modules > /tmp/build.log 2>&1; then
+              echo "=== SUCCESS: LLVM $VER works ==="
+              tail -5 /tmp/build.log
+              return 0
+            fi
+            echo "LLVM $VER failed"
+            tail -3 /tmp/build.log
+            return 1
           }
           
           cd "$KERNEL"
-          apply_patches
           
-          echo "=== Shifting until 12 meets 17 ==="
-          
-          CURRENT=17
-          MAX_SHIFT=6
-          SHIFT_COUNT=0
-          
-          while [ "$CURRENT" -ge 12 ] && [ "$SHIFT_COUNT" -lt "$MAX_SHIFT" ]; do
-            llvm_bin=$(find_llvm "$CURRENT")
-            if [ -z "$llvm_bin" ]; then
-              echo "LLVM $CURRENT not available"
-              CURRENT=$(shift_version "$CURRENT")
-              ((SHIFT_COUNT++))
-              continue
-            fi
-            
-            echo ""
-            echo "=== Shift $SHIFT_COUNT: Trying LLVM $CURRENT ==="
-            expand "$CURRENT" "$llvm_bin"
-            
-            if make -j$(nproc) Image.lz4 modules > /tmp/build.log 2>&1; then
-              echo "=== SUCCESS: LLVM $CURRENT works - 12 meets $CURRENT ==="
-              tail -10 /tmp/build.log
+          # Try simple jump first (17 directly)
+          echo "=== Try simple jump: 12 + 17 ==="
+          CLANG17=$(find_llvm 17)
+          if [ -n "$CLANG17" ]; then
+            if try 17 "$CLANG17"; then
+              echo "Simple jump works!"
               exit 0
             fi
+          fi
+          
+          # Simple jump failed. Explore the full bridge.
+          # Try ALL paths: 12->13->14->15->16->17
+          # Whatever combination works, that's the bridge
+          echo ""
+          echo "=== Simple jump failed. Exploring full bridge. ==="
+          echo "=== Will try every version until everything aligns. ==="
+          
+          FOUND=""
+          
+          # Try each step down from 17
+          for VER in 16 15 14 13; do
+            CLANG=$(find_llvm "$VER")
+            [ -z "$CLANG" ] && continue
             
-            echo "LLVM $CURRENT failed, shifting..."
-            tail -5 /tmp/build.log
-            git checkout -- . 2>/dev/null || true
-            apply_patches > /dev/null 2>&1 || true
-            
-            CURRENT=$(shift_version "$CURRENT")
-            ((SHIFT_COUNT++))
+            if try "$VER" "$CLANG"; then
+              FOUND="$VER"
+              echo "=== Bridge found at LLVM $VER ==="
+              break
+            fi
           done
           
-          echo "=== Falling back: pure Clang 12 (no expansion) ==="
-          git checkout -- . 2>/dev/null || true
-          apply_patches > /dev/null 2>&1 || true
-          make -j$(nproc) Image.lz4 modules 2>&1 | tail -10
+          # If still nothing, try 12 (no expansion - pure baseline)
+          if [ -z "$FOUND" ]; then
+            echo ""
+            echo "=== Falling back: pure Clang 12 (no expansion) ==="
+            git checkout -- . 2>/dev/null || true
+            for p in ../patches/*.patch; do
+              [ -f "$p" ] && patch -p1 -N < "$p" 2>/dev/null || true
+            done
+            [ -f ../patches/configs/ksu-nh.defconfig ] && \
+              cp ../patches/configs/ksu-nh.defconfig arch/arm64/configs/
+            make ksu-nh.defconfig 2>/dev/null || make lineage_parrot_defconfig
+            make olddefconfig > /dev/null 2>&1
+            make -j$(nproc) Image.lz4 modules 2>&1 | tail -10
+          fi
+          
+          echo "=== Build complete (bridge: ${FOUND:-12}) ==="
         id: build
 
       - name: Package
