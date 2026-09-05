@@ -170,12 +170,14 @@ jobs:
         run: |
           # SUSFS, ZeroMount, HybridMount, and colonel source files get
           # EXPANDED/STRENGTHENED here using Clang 17 + Kotoamatsukami passes.
-          # They go into the kernel source tree ALREADY EXPANDED.
-          # This way they don't need re-expansion at compile time.
-          # The expansion uses LLVM 17 obfuscation style to:
-          #   - Flatten code patterns (defeat scanners)
-          #   - Expand/strengthen the binary capability
-          #   - Keep KMI identical (symbol table unchanged)
+          # The styling/expansion functions get taught/assigned to those binaries.
+          # Then KMI registers them (preserved symbol table) so the kernel can link them.
+          # Flow per file:
+          #   1. Clang 17 emits LLVM IR (.ll) with styling/expansion applied
+          #   2. opt-17 + Kotoamatsukami flattens/expands the IR
+          #   3. Clang 12 emits assembly (.s) with IDENTICAL symbol table (KMI)
+          #   4. Kernel Makefile links them in
+          # Result: expanded binaries, same KMI, scanned-but-not-flagged code
           cd kernel-source
           echo "=== Expanding/strengthening source with Clang 17 ==="
           for src in fs/susfs.c fs/zeromount.c fs/koto/sprof_eud.c \
