@@ -5,6 +5,14 @@ name: AnyRealm NUKI Colonel - Moto G Stylus 5G 2023 (SM6450 parrot)
 # Fully decoupled from upstream parrot/moto/waipio GKI inheritance.
 # No vendor DLKM, no GKI 2.0, no compliance fallbacks.
 # Mirrors /mnt/sda2/kernel-msm-1/build.config.anyrealm.kernel exactly.
+#
+# CLANG 17 WRAPPER ENGINE:
+# The Colonel Clang 17 wrapper is at the START of the build pipeline.
+# It uses Clang 17 as a frontend that calls Kotoamatsukami LLVM-17 passes
+# to flatten code, defeat scanners, and preserve KMI.
+# Clang 12 is the inner compiler (matches in-tree snapdragon toolchain).
+#
+# FLAGS = Logic | C/H Files = Movement | DISC = Proof | PATCH = Seal
 
 on:
   push:
@@ -30,17 +38,53 @@ jobs:
           path: super-builders
           fetch-depth: 1
 
-      - name: Install Dependencies (jammy - clang12 safe)
+      - name: Install Dependencies (jammy - clang12 + clang17 safe)
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison flex libssl-dev libelf-dev cpio kmod python3 python-is-python3 \
             lz4 liblz4-tool libncurses-dev rsync zip curl wget make device-tree-compiler \
-            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu lld-12 llvm-12 clang-12 git-lfs
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu lld-12 llvm-12 clang-12 \
+            llvm-17 clang-17 lld-17 cmake ninja-build git-lfs
           # Create bare clang symlink pointing to clang-12 if not present
           sudo ln -sf /usr/bin/clang-12 /usr/bin/clang
           sudo ln -sf /usr/bin/ld.lld-12 /usr/local/bin/ld.lld
           sudo ln -sf /usr/bin/ld.lld-12 /usr/local/bin/ld64.lld
           sudo ln -sf /usr/bin/python3 /usr/local/bin/python
+
+      - name: Clone & Build Kotoamatsukami (Clang 17 wrapper at the start)
+        run: |
+          # Kotoamatsukami = LLVM-17 obfuscator
+          # Clang 17 wraps around Clang 12 to flatten code, defeat scanners, preserve KMI
+          echo "=== Kotoamatsukami (LLVM 17 obfuscator) ==="
+          git clone --depth=1 -b llvm-17-plugins https://github.com/015stray91/Kotoamatsukami.git kotoamatsukami
+          cd kotoamatsukami
+          echo "=== Building Kotoamatsukami LLVM 17 plugin ==="
+          mkdir -p build && cd build
+          if [ -f /usr/lib/llvm-17/lib/cmake/llvm/LLVMConfig.cmake ]; then
+            LLVM_DIR=/usr/lib/llvm-17/lib/cmake/llvm
+          else
+            LLVM_DIR=/usr/lib/cmake/llvm-17
+          fi
+          cmake -G Ninja -DLLVM_DIR="$LLVM_DIR" -DCMAKE_BUILD_TYPE=Release .. 2>&1 | tail -5
+          ninja -j$(nproc) 2>&1 | tail -5
+          if [ -f Kotoamatsukami.so ]; then
+            sudo install -m 0755 Kotoamatsukami.so /usr/local/lib/
+            echo "Kotoamatsukami.so installed to /usr/local/lib/"
+          else
+            echo "WARNING: Kotoamatsukami.so not built - will use clang-17 directly"
+          fi
+
+      - name: Install Colonel Clang 17 Wrapper (the wrapper around the build)
+        run: |
+          # Colonel Clang 17 wrapper = Kotoamatsukami static-link wrapper
+          # This wraps Clang 12 with Clang 17 to flatten code, defeat scanners
+          # FLAGS = Logic | C/H Files = Movement | DISC = Proof | PATCH = Seal
+          echo "=== Installing Colonel Clang 17 wrapper ==="
+          sudo install -m 0755 super-builders/colonel/toolchain/build_static.sh /usr/local/bin/colonel-cc
+          sudo install -m 0755 super-builders/colonel/toolchain/clang_wrapper_static.sh /usr/local/bin/colonel-wrapper
+          which colonel-cc
+          cat /usr/local/bin/colonel-cc | head -5
+          echo "=== Colonel wrapper installed ==="
 
       - name: Clone NUKI Source + android-kernel-tools
         run: |
@@ -338,7 +382,16 @@ jobs:
           export CLANG_TRIPLE=aarch64-linux-gnu-
           # Always use absolute system paths (the in-tree symlinks confuse Kconfig's
           # compiler-existence check at olddefconfig time).
-          export CC=/usr/bin/clang-12
+          # Colonel Clang 17 wrapper wraps Clang 12 (the inner compiler)
+          # Clang 17 flattens code patterns, Kotoamatsukami plugin obfuscates LLVM IR
+          # Clang 12 still does the actual compilation to preserve KMI
+          export CC=/usr/local/bin/colonel-cc
+          export CLANG17_INNER=/usr/bin/clang-17
+          export CLANG12_INNER=/usr/bin/clang-12
+          export CLANG12=/usr/bin/clang-12
+          export KOTO_SO=/usr/local/lib/Kotoamatsukami.so
+          export OBFUSCATE=1
+          export OBF_PASSES="flatten,bogus-control-flow,substitution,indirect-call"
           export LD=/usr/bin/ld.lld-12
           export AR=/usr/bin/llvm-ar-12
           export NM=/usr/bin/llvm-nm-12
