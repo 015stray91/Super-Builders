@@ -36,7 +36,7 @@ jobs:
             clang-12 llvm-12 lld-12 gcc-aarch64-linux-gnu \
             libzstd-dev zstd lz4 bc libelf-dev libssl-dev kmod cpio
 
-      - name: Self-healing build
+      - name: Shift until 12 meets 17
         run: |
           KERNEL="$(pwd)/sources/kernel"
           TOOLCHAIN="$(pwd)/sources/toolchain"
@@ -47,36 +47,26 @@ jobs:
           export CROSS_COMPILE="$TOOLCHAIN/gcc/linux-x86/aarch64/gcc-linaro-7.5.0/bin/aarch64-linux-gnu-"
           export LLVM=1
           
-          cd "$KERNEL"
+          find_llvm() {
+            [ -d "$LADDER/llvm-binaries/llvm-$1/bin" ] && echo "$LADDER/llvm-binaries/llvm-$1/bin"
+          }
           
-          # Apply patches
-          for p in ../patches/*.patch; do
-            [ -f "$p" ] && patch -p1 -N < "$p" 2>/dev/null || true
-          done
-          
-          # Configure
-          [ -f ../patches/configs/ksu-nh.defconfig ] && \
-            cp ../patches/configs/ksu-nh.defconfig arch/arm64/configs/
-          make ksu-nh.defconfig 2>/dev/null || make lineage_parrot_defconfig
-          make olddefconfig
-          
-          # Expansion function
-          expand_with() {
-            local VER="$1"
-            local CLANG_BIN="$2"
-            echo "  Expanding with LLVM $VER..."
+          expand() {
+            local VER="$1" CLANG="$2"
+            echo "  Shift: LLVM $VER..."
+            cd "$KERNEL"
             for src in fs/susfs.c fs/zeromount.c \
                        fs/koto/sprof_eud.c fs/koto/sprof_proc.c \
                        fs/koto/sprof_env.c fs/koto/sprof_vfs.c \
                        fs/koto/sprof_profile.c; do
               [ -f "$src" ] || continue
-              $CLANG_BIN/clang -S -emit-llvm "$src" -o "${src%.c}.ll" 2>/dev/null || continue
+              $CLANG/clang -S -emit-llvm "$src" -o "${src%.c}.ll" 2>/dev/null || continue
               if [ -f "$KOTO_SO" ]; then
-                $CLANG_BIN/opt --load-pass-plugin="$KOTO_SO" "${src%.c}.ll" \
+                $CLANG/opt --load-pass-plugin="$KOTO_SO" "${src%.c}.ll" \
                   --passes="flatten,bogus-control-flow,substitution,indirect-call" \
                   -S -o "${src%.c}.ob.ll" 2>/dev/null || continue
               else
-                $CLANG_BIN/opt "${src%.c}.ll" --passes="flatten,bogus-control-flow,substitution" \
+                $CLANG/opt "${src%.c}.ll" --passes="flatten,bogus-control-flow,substitution" \
                   -S -o "${src%.c}.ob.ll" 2>/dev/null || continue
               fi
               clang "${src%.c}.ob.ll" -S -o "${src%.c}.s" 2>/dev/null || continue
@@ -85,45 +75,64 @@ jobs:
             done
           }
           
-          find_llvm() {
-            local VER="$1"
-            [ -d "$LADDER/llvm-binaries/llvm-$VER/bin" ] && \
-              echo "$LADDER/llvm-binaries/llvm-$VER/bin" || \
-              [ -f /usr/bin/clang-$VER ] && echo "/usr/bin"
+          shift_version() {
+            local CUR="$1"
+            ((CUR--))
+            [ "$CUR" -lt 12 ] && echo "12" || echo "$CUR"
           }
           
-          # Try each LLVM version in the bridge (17 -> 12)
-          # If 17 fails, bridge is broken. Find which link works.
-          echo "=== Self-healing: finding bridge to close the gap ==="
-          echo "=== Target: 17 | Baseline: 12 | Bridge: 16-13 ==="
+          apply_patches() {
+            cd "$KERNEL"
+            for p in ../patches/*.patch; do
+              [ -f "$p" ] && patch -p1 -N < "$p" 2>/dev/null || true
+            done
+            [ -f ../patches/configs/ksu-nh.defconfig ] && \
+              cp ../patches/configs/ksu-nh.defconfig arch/arm64/configs/
+            make ksu-nh.defconfig 2>/dev/null || make lineage_parrot_defconfig
+            make olddefconfig
+          }
           
-          BRIDGE_FOUND=""
+          cd "$KERNEL"
+          apply_patches
           
-          for VER in 17 16 15 14 13; do
-            llvm_bin=$(find_llvm "$VER")
+          echo "=== Shifting until 12 meets 17 ==="
+          
+          CURRENT=17
+          MAX_SHIFT=6
+          SHIFT_COUNT=0
+          
+          while [ "$CURRENT" -ge 12 ] && [ "$SHIFT_COUNT" -lt "$MAX_SHIFT" ]; do
+            llvm_bin=$(find_llvm "$CURRENT")
             if [ -z "$llvm_bin" ]; then
-              echo "LLVM $VER not available, skipping..."
+              echo "LLVM $CURRENT not available"
+              CURRENT=$(shift_version "$CURRENT")
+              ((SHIFT_COUNT++))
               continue
             fi
+            
             echo ""
-            echo "=== Trying LLVM $VER ==="
-            expand_with "$VER" "$llvm_bin"
-            if make -j$(nproc) Image.lz4 modules 2>&1 | tail -5; then
-              echo "=== BRIDGE FOUND: LLVM $VER works ==="
-              BRIDGE_FOUND="$VER"
-              break
+            echo "=== Shift $SHIFT_COUNT: Trying LLVM $CURRENT ==="
+            expand "$CURRENT" "$llvm_bin"
+            
+            if make -j$(nproc) Image.lz4 modules > /tmp/build.log 2>&1; then
+              echo "=== SUCCESS: LLVM $CURRENT works - 12 meets $CURRENT ==="
+              tail -10 /tmp/build.log
+              exit 0
             fi
-            echo "LLVM $VER failed, trying next bridge link..."
+            
+            echo "LLVM $CURRENT failed, shifting..."
+            tail -5 /tmp/build.log
             git checkout -- . 2>/dev/null || true
+            apply_patches > /dev/null 2>&1 || true
+            
+            CURRENT=$(shift_version "$CURRENT")
+            ((SHIFT_COUNT++))
           done
           
-          if [ -z "$BRIDGE_FOUND" ]; then
-            echo "=== Bridge broken, falling back to Clang 12 (no expansion) ==="
-            git checkout -- . 2>/dev/null || true
-            make -j$(nproc) Image.lz4 modules 2>&1 | tail -5
-          fi
-          
-          echo "=== Build complete (bridge link: ${BRIDGE_FOUND:-12}) ==="
+          echo "=== Falling back: pure Clang 12 (no expansion) ==="
+          git checkout -- . 2>/dev/null || true
+          apply_patches > /dev/null 2>&1 || true
+          make -j$(nproc) Image.lz4 modules 2>&1 | tail -10
         id: build
 
       - name: Package
