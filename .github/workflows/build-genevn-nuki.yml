@@ -152,29 +152,17 @@ jobs:
 
           # Download official pre-built LLVM 12-17 to /tmp/clang-static-versions/
           # This populates the ladder: 12 (baseline) up to 17 (target)
-          echo "=== Pulling pre-built ladder from clang-tools-static-binaries artifacts ==="
-          # All 6 versions (12-17) pre-built via clang-tools-static-binaries
-          # GitHub Actions workflow: .github/workflows/prebuild-ladder.yml
-          # No runtime build, no env vars needed (static binaries)
-          # Saved on remote, just download
-
-          # Download complete ladder artifact
-          mkdir -p /tmp/complete-ladder
-          if [ -n "$GITHUB_TOKEN" ]; then
-            gh run download \
-              --repo 015stray91/clang-tools-static-binaries \
-              --name complete-ladder \
-              --dir /tmp/complete-ladder 2>/dev/null || true
-          fi
-          if [ -f /tmp/complete-ladder/complete-ladder.tar.xz ]; then
-            tar -xf /tmp/complete-ladder/complete-ladder.tar.xz -C /tmp/
-            for v in 12 13 14 15 16 17; do
-              if [ -d "/tmp/complete-ladder/llvm-$v" ]; then
-                echo "  LLVM $v ready: $(ls /tmp/complete-ladder/llvm-$v/bin/ 2>/dev/null | head -3)"
-              fi
-            done
-          else
-            echo "  Pre-built ladder not available, will use snapdragon 12 + apt clang 17"
+          echo "=== Cloning pre-built ladder (llvm-binaries/) ==="
+          # All 6 versions (12-17) pre-built by CI, committed to repo directory
+          # clang-tools-static-binaries/.github/workflows/prebuild-ladder.yml
+          # Binaries are in: llvm-binaries/llvm-{version}/bin/
+          # Just clone, they're already there. No env vars, no artifact download.
+          git clone --depth=1 \
+            https://github.com/015stray91/clang-tools-static-binaries.git \
+            toolchain-ladder
+          if [ -d toolchain-ladder/llvm-binaries ]; then
+            echo "  Pre-built ladder available:"
+            ls toolchain-ladder/llvm-binaries/ | head -10
           fi
           echo "=== Kotoamatsukami outer wrapper probe (local only) ==="
           [ -d /home/slm015/compiler-node/fetched/Kotoamatsukami ] && \
