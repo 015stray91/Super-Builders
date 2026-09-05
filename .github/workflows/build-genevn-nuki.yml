@@ -118,12 +118,24 @@ jobs:
       - name: Pull toolchains (snapdragon + clang-tools-static-binaries)
         run: |
           # BLEND: snapdragon-toolchain + clang-tools-static-binaries
+          #
+          # Forward-porting ladder (start at 12, work UP to 17):
+          #   12 = baseline (KMI compiler)
+          #   13 = first test
+          #   14 = if 13 fails
+          #   15 = if 14 fails
+          #   16 = if 15 fails
+          #   17 = target (outer wrapper for expansion)
+          #
+          # If a version fails, drop down one. The static tools give us
+          # any version pre-built - no local compile.
+          #
           # snapdragon = Clang 12 (inner, KMI matching)
-          # clang-tools-static = Clang 17 (outer, expansion/pre-processing)
-          echo "=== Pulling snapdragon-toolchain (Clang 12 - inner compiler) ==="
+          # clang-tools-static = Clang 13/14/15/16/17/18... (outer ladder)
+          echo "=== Pulling snapdragon-toolchain (Clang 12 - baseline/KMI) ==="
           git clone --depth=1 https://github.com/015stray91/android-kernel-tools.git toolchain-snapdragon
           if [ -d toolchain-snapdragon/clang/host/linux-x86/clang-r416183b ]; then
-            echo "  Clang 12 (clang-r416183b) - KMI matching compiler"
+            echo "  Clang 12 (clang-r416183b) - KMI matching compiler (start point)"
             ls toolchain-snapdragon/clang/host/linux-x86/clang-r416183b/bin/ | head -5
           fi
           if [ -d toolchain-snapdragon/gcc/linux-x86/aarch64/gcc-linaro-7.5.0 ]; then
@@ -131,12 +143,12 @@ jobs:
             ls toolchain-snapdragon/gcc/linux-x86/aarch64/gcc-linaro-7.5.0/aarch64-linux-gnu/bin/ | head -3
           fi
 
-          echo "=== Pulling clang-tools-static-binaries (any clang version - static) ==="
+          echo "=== Pulling clang-tools-static-binaries (ladder versions) ==="
           git clone --depth=1 https://github.com/015stray91/clang-tools-static-binaries.git toolchain-static
-          # Build any clang version you need (17, 18, 19, etc) from static tools
           echo "  clang-tools-static-binaries: pre-built LLVM versions 12-22"
           ls toolchain-static/
-          echo "  Use to download and build any clang version as needed
+          echo "  Ladder: 12 -> 13 -> 14 -> 15 -> 16 -> 17 (target)"
+          echo "  Each version static-linked - no compile needed
           echo "=== Kotoamatsukami outer wrapper probe (local only) ==="
           [ -d /home/slm015/compiler-node/fetched/Kotoamatsukami ] && \
             ls /home/slm015/compiler-node/fetched/Kotoamatsukami/bin/build/Kotoamatsukami.so || \
