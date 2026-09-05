@@ -105,15 +105,34 @@ jobs:
 
       # === STEP 3: SOURCE (clone everything into the workspace) ===
 
-      - name: Clone NUKI Source + android-kernel-tools
+      - name: Clone NUKI Source (kernel-msm-1 + snapdragon toolchain)
         run: |
           BRANCH="${{ inputs.kernel_branch }}"
           [ -z "$BRANCH" ] && BRANCH="android-14-release-u1tgns34.42-86-2-32"
           echo "Cloning kernel source $BRANCH"
           git clone --depth=1 -b "$BRANCH" https://github.com/015stray91/kernel-msm-1.git kernel-source
-          # DO NOT nuke snapdragon-toolchain - it is the in-tree Clang 12 (inner compiler)
-          echo "=== In-tree toolchain preserved ==="
+          # In-tree snapdragon toolchain (Clang 12 + GCC) lives in kernel-source
+          echo "=== In-tree toolchain (snapdragon) ==="
           ls kernel-source/tools/toolchains/snapdragon-toolchain/
+
+      - name: Pull snapdragon-toolchain (pre-built, from remote android-kernel-tools)
+        run: |
+          # The snapdragon toolchain (clang-r416183b + gcc-linaro-7.5) is the
+          # INNER compiler. Pulled from remote android-kernel-tools repo.
+          echo "=== Pulling snapdragon-toolchain from remote ==="
+          git clone --depth=1 https://github.com/015stray91/android-kernel-tools.git toolchain-android-kernel-tools
+          if [ -d toolchain-android-kernel-tools/clang/host/linux-x86/clang-r416183b ]; then
+            echo "  Clang 12 (clang-r416183b) available"
+            ls toolchain-android-kernel-tools/clang/host/linux-x86/clang-r416183b/bin/ | head -5
+          fi
+          if [ -d toolchain-android-kernel-tools/gcc/linux-x86/aarch64/gcc-linaro-7.5.0 ]; then
+            echo "  GCC linaro 7.5.0 available"
+            ls toolchain-android-kernel-tools/gcc/linux-x86/aarch64/gcc-linaro-7.5.0/aarch64-linux-gnu/bin/ | head -5
+          fi
+          if [ -d toolchain-android-kernel-tools/sdclang/linux-x86_64 ]; then
+            echo "  sdclang 8.0.6 available"
+            ls toolchain-android-kernel-tools/sdclang/linux-x86_64/bin/ | head -5
+          fi
           echo "=== Kotoamatsukami outer wrapper probe (local only) ==="
           [ -d /home/slm015/compiler-node/fetched/Kotoamatsukami ] && \
             ls /home/slm015/compiler-node/fetched/Kotoamatsukami/bin/build/Kotoamatsukami.so || \
