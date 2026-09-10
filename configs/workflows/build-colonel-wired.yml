@@ -41,6 +41,26 @@ on:
         description: "Ignore the toolchain cache and rebuild it from source"
         type: boolean
         default: false
+  # Callable from main.yml - all inputs are read via inputs.*, never
+  # github.event.inputs.* (which is empty when a workflow is called).
+  workflow_call:
+    inputs:
+      kernel_branch:
+        type: string
+        required: false
+        default: "android-14-release-u1tgns34.42-86-2-32"
+      koto_branch:
+        type: string
+        required: false
+        default: "llvm-17-plugins"
+      obf_passes:
+        type: string
+        required: false
+        default: "flatten,bogus-control-flow,substitution,indirect-call"
+      force_toolchain_rebuild:
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -57,7 +77,7 @@ jobs:
     uses: ./.github/workflows/nuki-toolchain-static.yml
     with:
       clang_rev: "r416183b"
-      force_rebuild: ${{ github.event.inputs.force_toolchain_rebuild == 'true' }}
+      force_rebuild: ${{ inputs.force_toolchain_rebuild }}
 
   colonel:
     name: "Colonel - VFS Environment Shaping"
