@@ -84,7 +84,7 @@ jobs:
         id: meta
         run: |
           set -euo pipefail
-          CLANG_REV="${{ github.event.inputs.clang_rev || env.CLANG_REV }}"
+          CLANG_REV="${{ inputs.clang_rev || env.CLANG_REV }}"
           echo "clang_rev=$CLANG_REV" >> "$GITHUB_OUTPUT"
           echo "amd64_toolchain=nuki-toolchain-amd64" >> "$GITHUB_OUTPUT"
           echo "arm64_toolchain=nuki-toolchain-arm64" >> "$GITHUB_OUTPUT"
@@ -93,7 +93,7 @@ jobs:
 
       - name: Try cache
         id: cache
-        if: ${{ github.event.inputs.force_rebuild != 'true' }}
+        if: ${{ !inputs.force_rebuild }}
         uses: actions/cache/restore@v4
         with:
           path: |
@@ -163,7 +163,7 @@ jobs:
           echo "built on: ${{ runner.os }} / ${{ matrix.runner }}" >> .toolchain-stamp
 
       - name: Save cache
-        if: ${{ github.event.inputs.force_rebuild != 'true' }}
+        if: ${{ !inputs.force_rebuild }}
         uses: actions/cache/save@v4
         with:
           path: |
