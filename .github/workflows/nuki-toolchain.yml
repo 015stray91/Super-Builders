@@ -1,11 +1,10 @@
 name: NUKI Toolchain + Environment
-
 on:
   workflow_call:
     inputs:
-      device_codename:
-        type: string
-        required: true
+      device_codename: AR-Nuki-genevn
+      type: string      
+      required: true
       kernel_branch:
         type: string
         required: true
