@@ -40,7 +40,6 @@ jobs:
              git clone https://github.com/015stray91/kagura.git
              git clone https://github.com/015stray91/setup-ndk-clang.git
              git clone https://github.com/015stray91/clang-tools-static-binaries.git
-             git clone https://github.com/015stray91/Kotoamatsukami.git
              git clone https://github.com/015stray91/dtc.git
              git clone https://github.com/015stray91/smudgeC.git
              git clone https://github.com/015stray91/ollvm.git
