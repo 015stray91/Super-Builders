@@ -31,12 +31,38 @@ jobs:
       - name: Clone android-kernel-tools (compiler node)
         run: |
           git clone --depth=1 https://github.com/015stray91/android-kernel-tools.git compiler-node
-          ls compiler-node/clang/host/linux-x86/
-          ls compiler-node/gcc/linux-x86/aarch64/
-
-      - name: Upload Toolchain Artifact
+          ls compiler-node/clang/host/linux-amd64/arch64/
+          ls compiler-node/gcc/linux-amd64/aarch64/
+      - name: clone obfuscation toolchains (pluto ,hikari, goat-plugin,xollvm
+        run: |
+             git clone https://github.com/015stray91/Nullprt.git 
+             git clone https://github.com/015stray91/xollvm.git
+             git clone https://github.com/015stray91/kagura.git
+             git clone https://github.com/015stray91/setup-ndk-clang.git
+             git clone https://github.com/015stray91/clang-tools-static-binaries.git
+             git clone https://github.com/015stray91/Kotoamatsukami.git
+             git clone https://github.com/015stray91/dtc.git
+             git clone https://github.com/015stray91/smudgeC.git
+             git clone https://github.com/015stray91/ollvm.git
+             git clone https://github.com/015stray91/cpullvm-toolchain.git
+             git clone https://github.com/015stray91/cpp-toolchain.git
+             git clone https://github.com/015stray91/llvm-full.git
+             git clone https://github.com/015stray91/hexagon-sdk.git
+             git clone https://github.com/015stray91/Obscura.git
+             gir clone https://github.com/015stray91/o-mvll.git
+             git clone https://github.com/015stray91/zyrox.git
+             git clone https://github.com/015stray91/CryptoMorph.git
+             git clone https://github.com/015stray91/Obfuscator-Rust.git
+             git clone https://github.com/015stray91/codeenigma.git
+             git clone https://github.com/015stray91/LKM_Tools.git
+             git clone https://github.com/015stray91/GOAT-Plugs.git
+             git clone https://github.com/015stray91/ObfuscatorNDK.git
+             git clone https://github.com/015stray91/HikariSummer.git
+             git clone https://github.com/015stray91/Pluto-Obfuscator.git
+             
+      -  name: Upload Toolchain Artifact
         uses: actions/upload-artifact@v4
         with:
           name: nuki-toolchain
           path: compiler-node/
-          retention-days: 1
+          retention-days: 90
