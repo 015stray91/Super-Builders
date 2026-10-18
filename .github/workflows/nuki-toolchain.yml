@@ -29,11 +29,7 @@ jobs:
 
       - name: Clone android-kernel-tools (compiler node)
         run: |
-          git clone --depth=1 https://github.com/015stray91/android-kernel-tools.git compiler-node
-          ls compiler-node/clang/host/linux-amd64/arch64/
-          ls compiler-node/gcc/linux-amd64/aarch64/
-      - name: clone obfuscation toolchains (pluto ,hikari, goat-plugin,xollvm
-        run: |
+          git clone --depth=1 https://github.com/015stray91/android-kernel-tools.git compiler-no
              git clone https://github.com/015stray91/Nullprt.git 
              git clone https://github.com/015stray91/xollvm.git
              git clone https://github.com/015stray91/kagura.git
