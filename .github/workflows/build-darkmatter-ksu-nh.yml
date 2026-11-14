@@ -3,10 +3,10 @@ name: Build DarkMatter KSU-Next + NetHunter Kernel
 on:
   workflow_dispatch:
     inputs:
-      kernel_branch:
-        description: 'Branch or tag in Darkmatter-kernel to build'
+      kernel_version:
+        description: 'Linux 6.x kernel version from kernel.org'
         required: true
-        default: 'main'
+        default: '6.8.12'
         type: string
   push:
     branches: [ main, master ]
@@ -22,12 +22,12 @@ jobs:
           repository: 015stray91/Super-Builders
           path: super-builders
 
-      - name: Checkout Darkmatter-kernel
-        uses: actions/checkout@v4
-        with:
-          repository: 015stray91/Darkmatter-kernel
-          ref: ${{ inputs.kernel_branch || 'main' }}
-          path: kernel_src
+      - name: Download Linux Kernel Source
+        run: |
+          VER="${{ inputs.kernel_version || '6.8.12' }}"
+          curl -fL "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-${VER}.tar.xz" -o linux.tar.xz
+          tar -xf linux.tar.xz
+          mv "linux-${VER}" kernel_src
 
       - name: Install build dependencies
         run: |
