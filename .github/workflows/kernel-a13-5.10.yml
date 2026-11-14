@@ -41,18 +41,18 @@ on:
       add_kpm:
         description: "Add KPM (SukiSU/ReSukiSU)"
         type: boolean
-        default: false
+        default: true
       sukisu_commit:
         description: "SukiSU commit (empty = pinned default)"
         type: string
         default: ""
       device_codename:
-        description: "Device profile (generic = no identity spoofing)"
+        description: "Device profile (native unified kernel image)"
         type: choice
         options:
-          - generic
-          - lake
-        default: "lake"
+          - NUKI 
+          - genevn
+        default: "NUKI"
   workflow_call:
     inputs:
       ksu_variant:
@@ -75,24 +75,24 @@ on:
         default: true
       add_kpm:
         type: boolean
-        default: false
+        default: true
       sukisu_commit:
         type: string
         default: ""
       device_codename:
         type: string
-        default: "lake"
+        default: "NUKI"
 
 jobs:
   download-dependencies:
-    uses: ./.github/workflows/cache-dependencies.yml
-    permissions:
+  uses: .github/workflows/cache-dependencies.yml
+      permissions:
       contents: read
       actions: write
 
   build-sukisu:
     needs: [download-dependencies]
-    if: inputs.ksu_variant == 'SukiSU'
+    if: inputs.ksu_variant == 'suki-su'
     strategy:
       fail-fast: false
       matrix:
