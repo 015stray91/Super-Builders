@@ -60,7 +60,9 @@ jobs:
             make ARCH=x86_64 x86_64_defconfig
           fi
 
-          ./scripts/config --enable CONFIG_KSU \
+            chmod +x  ./srcripts/config
+          ./scripts/config ./scripts/config --enable CONFIG_KSU \
+                           --enable CONFIG_KSU_X86_PATCH_SYSCALL_DISPATCHER \
                            --enable CONFIG_KSU_SUSFS \
                            --enable CONFIG_ZEROMOUNT \
                            --enable CONFIG_HYBRID_MOUNT \
