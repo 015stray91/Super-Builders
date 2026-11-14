@@ -1,0 +1,94 @@
+name: Build DarkMatter KSU-Next + NetHunter Kernel
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_branch:
+        description: 'Branch or tag in Darkmatter-kernel to build'
+        required: true
+        default: 'main'
+        type: string
+  push:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout Super-Builders
+        uses: actions/checkout@v4
+        with:
+          repository: 015stray91/Super-Builders
+          path: super-builders
+
+      - name: Checkout Darkmatter-kernel
+        uses: actions/checkout@v4
+        with:
+          repository: 015stray91/Darkmatter-kernel
+          ref: ${{ inputs.kernel_branch || 'main' }}
+          path: kernel_src
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential bc bison flex libssl-dev libelf-dev curl git cpio
+
+      - name: Add KernelSU-Next
+        working-directory: kernel_src
+        run: |
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next
+
+      - name: Configure Kernel (DarkMatter + KSU-Next + SUSFS + NetHunter)
+        working-directory: kernel_src
+        run: |
+          if [ -f "arch/x86/configs/darkmatter_defconfig" ]; then
+            make ARCH=x86_64 darkmatter_defconfig
+          else
+            make ARCH=x86_64 x86_64_defconfig
+          fi
+
+          ./scripts/config --enable CONFIG_KSU \
+                           --enable CONFIG_KSU_SUSFS \
+                           --enable CONFIG_KPROBES \
+                           --enable CONFIG_HAVE_KPROBES \
+                           --enable CONFIG_KPROBE_EVENTS \
+                           --enable CONFIG_MAC80211 \
+                           --enable CONFIG_CFG80211_WEXT \
+                           --enable CONFIG_USB_HID \
+                           --enable CONFIG_HID_GENERIC \
+                           --enable CONFIG_USB_GADGET \
+                           --enable CONFIG_USB_CONFIGFS \
+                           --enable CONFIG_USB_CONFIGFS_F_HID \
+                           --enable CONFIG_BRIDGE \
+                           --enable CONFIG_TUN \
+                           --enable CONFIG_ASUS_WMI \
+                           --enable CONFIG_ASUS_NB_WMI \
+                           --enable CONFIG_DRM_AMDGPU \
+                           --enable CONFIG_DRM_I915 \
+                           --enable CONFIG_NVME_CORE \
+                           --enable CONFIG_BLK_DEV_NVME \
+                           --enable CONFIG_I2C_HID_ACPI \
+                           --enable CONFIG_HID_MULTITOUCH \
+                           --enable CONFIG_PINCTRL_AMD \
+                           --module CONFIG_RTW88 \
+                           --module CONFIG_RTW89 \
+                           --module CONFIG_MT7921E \
+                           --module CONFIG_IWLWIFI \
+                           --module CONFIG_BT_HCIBTUSB
+
+          make ARCH=x86_64 olddefconfig
+
+      - name: Build bzImage & modules
+        working-directory: kernel_src
+        run: |
+          make ARCH=x86_64 -j$(nproc) bzImage modules
+          mkdir -p ../out/modules
+          make ARCH=x86_64 INSTALL_MOD_PATH=../out/modules modules_install
+          cp arch/x86/boot/bzImage ../out/kernel
+
+      - name: Upload Kernel & Modules Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: darkmatter-ksu-nh-kernel
+          path: out/
