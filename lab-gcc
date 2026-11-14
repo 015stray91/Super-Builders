@@ -1,0 +1,22 @@
+#!/bin/bash
+# lab-gcc: gcc-cross for the GOAT mask pass.
+# The genevn tree hardcodes clang-only flags; drop them (logged to stderr
+# and $LAB_DROPFILE) so each segment also builds under gcc for masking.
+DROP=(-fsanitize=shadow-call-stack -fsanitize=cfi -fsanitize=array-bounds
+  -fsanitize=local-bounds -Qunused-arguments -mno-global-merge
+  -ftrivial-auto-var-init=zero -fsplit-lto-unit -fsanitize-cfi-cross-dso
+  -fno-sanitize-cfi-canonical-jump-tables -fno-sanitize-blacklist
+  -flto=thin)
+out=(); dropped=()
+for a in "$@"; do
+  skip=0
+  for d in "${DROP[@]}"; do
+    if [ "$a" = "$d" ]; then skip=1; dropped+=("$a"); break; fi
+  done
+  [ $skip = 0 ] && out+=("$a")
+done
+if [ ${#dropped[@]} -gt 0 ]; then
+  echo "lab-gcc: dropped clang-only: ${dropped[*]}" >&2
+  [ -n "$LAB_DROPFILE" ] && printf '%s\n' "${dropped[@]}" >>"$LAB_DROPFILE"
+fi
+exec aarch64-linux-gnu-gcc "${out[@]}"

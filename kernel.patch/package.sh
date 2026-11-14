@@ -1,0 +1,711 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+MODULE_DIR="$PROJECT_ROOT/module"
+RELEASE_DIR="$PROJECT_ROOT/release"
+
+CURRENT_VERSION="$(grep '^version' "$PROJECT_ROOT/Cargo.toml" | head -1 | sed 's/.*"\(.*\)".*/\1/')"
+VERSION=""
+BUILD=false
+CLEAN=false
+DEPLOY=false
+REBOOT=false
+DEPLOY_PROFILE="debug"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --version) VERSION="$2"; shift 2 ;;
+        --build)   BUILD=true; shift ;;
+        --clean)   CLEAN=true; shift ;;
+        --deploy)  DEPLOY=true; shift ;;
+        --reboot)  REBOOT=true; shift ;;
+        --release) DEPLOY_PROFILE="release"; shift ;;
+        --debug)   DEPLOY_PROFILE="debug"; shift ;;
+        *)         echo "Unknown arg: $1"; exit 1 ;;
+    esac
+done
+
+if [ -z "$VERSION" ]; then
+    IFS='.-' read -r major minor patch pre <<< "$CURRENT_VERSION"
+    patch=$((patch + 1))
+    if [ -n "$pre" ]; then
+        NEW_VERSION="${major}.${minor}.${patch}-${pre}"
+    else
+        NEW_VERSION="${major}.${minor}.${patch}"
+    fi
+    echo "==> Version bumped: v${CURRENT_VERSION} → v${NEW_VERSION}"
+else
+    NEW_VERSION="${VERSION#v}"
+    [ "$NEW_VERSION" != "$CURRENT_VERSION" ] && \
+        echo "==> Version set: v${CURRENT_VERSION} → v${NEW_VERSION}"
+fi
+
+_stamp_saved="$(mktemp -d)"
+cp "$PROJECT_ROOT/Cargo.toml"   "$_stamp_saved/Cargo.toml"
+cp "$MODULE_DIR/module.prop"    "$_stamp_saved/module.prop"
+[ -f "$PROJECT_ROOT/Cargo.lock" ] && cp "$PROJECT_ROOT/Cargo.lock" "$_stamp_saved/Cargo.lock"
+_staging_active=""
+_unstamp() {
+    local rc=$?
+    # the staging tree used to be removed only on the paths that exit deliberately, so
+    # any failure set -e caught - or any ^C - left a full copy of the module in /tmp
+    [ -n "$_staging_active" ] && rm -rf "$_staging_active"
+    if [ "$rc" -ne 0 ] && [ -f "$_stamp_saved/Cargo.toml" ]; then
+        cp "$_stamp_saved/Cargo.toml" "$PROJECT_ROOT/Cargo.toml"
+        cp "$_stamp_saved/module.prop" "$MODULE_DIR/module.prop"
+        [ -f "$_stamp_saved/Cargo.lock" ] && cp "$_stamp_saved/Cargo.lock" "$PROJECT_ROOT/Cargo.lock"
+        echo "       version stamp rolled back to v${CURRENT_VERSION}" >&2
+    fi
+    rm -rf "$_stamp_saved"
+}
+trap _unstamp EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+sed -i "s/^version = \"$CURRENT_VERSION\"/version = \"$NEW_VERSION\"/" "$PROJECT_ROOT/Cargo.toml"
+
+if [ -f "$PROJECT_ROOT/Cargo.lock" ] && [ "$NEW_VERSION" != "$CURRENT_VERSION" ]; then
+    (cd "$PROJECT_ROOT" && "${CARGO:-cargo}" update --offline --quiet -p nomount 2>/dev/null) \
+        || (cd "$PROJECT_ROOT" && "${CARGO:-cargo}" metadata --offline --format-version 1 >/dev/null 2>&1) \
+        || echo "    !! could not refresh Cargo.lock for $NEW_VERSION; --locked builds may fail" >&2
+fi
+
+vbase="${NEW_VERSION%%-*}"
+IFS=. read -r vmaj vmin vpat <<< "$vbase"
+if [ "${vmin:-0}" -ge 100 ] || [ "${vpat:-0}" -ge 1000 ]; then
+    echo "fatal: v${NEW_VERSION} does not fit the versionCode field widths." >&2
+    echo "       vcode = major*100000 + minor*1000 + patch needs minor < 100 and" >&2
+    echo "       patch < 1000; this version would collide with another release and" >&2
+    echo "       managers, which key updates on versionCode alone, would read it as" >&2
+    echo "       a downgrade. Widen the multipliers (and keep every new code above" >&2
+    echo "       the largest already published) before bumping further." >&2
+    exit 1
+fi
+case "$NEW_VERSION" in
+    *-*)
+        echo "fatal: v${NEW_VERSION} carries a pre-release suffix, and the versionCode formula" >&2
+        echo "       drops it: v${vbase}-<suffix> and v${vbase} both map to the same code." >&2
+        echo "       Managers key the update offer on versionCode alone, so everyone who took" >&2
+        echo "       the pre-release would never be offered the final. Use a distinct patch" >&2
+        echo "       number instead of a suffix." >&2
+        exit 1
+        ;;
+esac
+vcode=$(( ${vmaj:-0} * 100000 + ${vmin:-0} * 1000 + ${vpat:-0} ))
+
+_published=$(sed -n 's/.*"versionCode"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$PROJECT_ROOT/update.json" 2>/dev/null | head -1)
+if [ -n "${_published:-}" ]; then
+    if [ "$vcode" -lt "$_published" ]; then
+        echo "fatal: versionCode ${vcode} for v${NEW_VERSION} is BELOW the published" >&2
+        echo "       ${_published} (see update.json). Root managers key the update offer on" >&2
+        echo "       versionCode alone, so publishing this would read as a downgrade and" >&2
+        echo "       no device would ever be offered it. Cut the version forward instead." >&2
+        exit 1
+    elif [ "$vcode" -eq "$_published" ] && [ "$NEW_VERSION" != "$CURRENT_VERSION" ]; then
+        echo "fatal: versionCode ${vcode} for v${NEW_VERSION} COLLIDES with the published" >&2
+        echo "       ${_published} (see update.json), and this is a version change, not a" >&2
+        echo "       rebuild. Two different versions sharing one code means the second is" >&2
+        echo "       never offered. Cut the version forward instead." >&2
+        exit 1
+    elif [ "$vcode" -eq "$_published" ]; then
+        echo "==> note: rebuilding already-published v${NEW_VERSION} (versionCode ${vcode});"
+        echo "    fine to sideload, but bump the version before cutting a release."
+    fi
+fi
+unset _published
+sed -i "s/^version=.*/version=v${NEW_VERSION}/" "$MODULE_DIR/module.prop"
+sed -i "s/^versionCode=.*/versionCode=${vcode}/" "$MODULE_DIR/module.prop"
+
+grep -q "^version=v${NEW_VERSION}\$" "$MODULE_DIR/module.prop" \
+    || { echo "fatal: could not stamp version= into module.prop" >&2; exit 1; }
+grep -q "^versionCode=${vcode}\$" "$MODULE_DIR/module.prop" \
+    || { echo "fatal: could not stamp versionCode= into module.prop - the release would" >&2
+         echo "       publish, and only release.yml's post-publish read would notice." >&2; exit 1; }
+
+VERSION="v${NEW_VERSION}"
+
+BUILD_COMMIT="$(git -C "$PROJECT_ROOT" rev-parse --verify --short HEAD 2>/dev/null || true)"
+if [ -z "$BUILD_COMMIT" ]; then
+    if [ -n "${SUITE_ALLOW_UNSTAMPED:-}" ]; then
+        BUILD_COMMIT="unknown"
+    else
+        echo "fatal: cannot resolve HEAD, so the zip would ship an unknown SUITE_COMMIT." >&2
+        echo "       Build from a git checkout, or set SUITE_ALLOW_UNSTAMPED=1 to accept it." >&2
+        exit 1
+    fi
+fi
+_dirt="$(git -C "$PROJECT_ROOT" status --porcelain 2>/dev/null \
+          | grep -vE ' (Cargo\.toml|Cargo\.lock|module/module\.prop)$' || true)"
+if [ -n "$_dirt" ]; then
+    BUILD_COMMIT="${BUILD_COMMIT}+dirty"
+fi
+export BUILD_COMMIT
+echo "==> Build commit: ${BUILD_COMMIT}"
+if [ -n "$_dirt" ]; then
+    echo "    +dirty because these paths are not clean:"
+    printf '%s\n' "$_dirt" | sed 's/^/      /'
+fi
+unset _dirt
+
+# mtime alone says nothing useful: a checkout, a copy or a touch moves it without the
+# source changing, and `git checkout` of an OLDER nm.c leaves the binary looking fresh
+# while it was built from something else entirely. Where a build recorded this stamp we
+# trust it instead; a binary from CI has no stamp, so mtime still decides there.
+nm_srcsum() {
+    cat "$PROJECT_ROOT/userspace/src/nm.c" "$PROJECT_ROOT/userspace/src/nm.h" \
+        | sha256sum | cut -d" " -f1
+}
+
+build_nm() {
+    local zig cc
+    zig="$(command -v zig || true)"
+    cc="${NDK_BIN:-/nonexistent}/aarch64-linux-android26-clang"
+    if [ -n "$zig" ]; then
+        "$zig" cc -target aarch64-linux -Oz -static -nostdlib -ffreestanding \
+            -fno-unwind-tables -fno-ident -Wno-invalid-noreturn -Wl,--entry=_start \
+            "$PROJECT_ROOT/userspace/src/nm.c" -o "$PROJECT_ROOT/nm-arm64" || return 2
+    elif [ -x "$cc" ]; then
+        echo "==> nm: no zig on path, building with the NDK's clang instead"
+        "$cc" -Oz -static -nostdlib -ffreestanding \
+            -fno-unwind-tables -fno-ident -Wno-invalid-noreturn -Wl,--entry=_start \
+            "$PROJECT_ROOT/userspace/src/nm.c" -o "$PROJECT_ROOT/nm-arm64" || return 2
+    else
+        return 1
+    fi
+    make -s -C "$PROJECT_ROOT/userspace/tools/sstrip" >/dev/null 2>&1 || true
+    if [ -x "$PROJECT_ROOT/userspace/tools/sstrip/sstrip" ]; then
+        if ! "$PROJECT_ROOT/userspace/tools/sstrip/sstrip" -z "$PROJECT_ROOT/nm-arm64" >/dev/null 2>&1; then
+            echo "fatal: sstrip failed on nm-arm64; it rewrites the ELF header before it can" >&2
+            echo "       fail, so the file is now suspect. Not packaging it." >&2
+            rm -f "$PROJECT_ROOT/nm-arm64"
+            return 2
+        fi
+    else
+        echo "==> nm: sstrip not built; shipping the unstripped binary" >&2
+    fi
+    if ! head -c 4 "$PROJECT_ROOT/nm-arm64" | grep -q 'ELF'; then
+        echo "fatal: nm-arm64 is not an ELF after stripping." >&2
+        rm -f "$PROJECT_ROOT/nm-arm64"
+        return 2
+    fi
+    local profile
+    for profile in debug release; do
+        install -Dm755 "$PROJECT_ROOT/nm-arm64" \
+            "$PROJECT_ROOT/target/aarch64-linux-android/${profile}/nm"
+    done
+    rm -f "$PROJECT_ROOT/nm-arm64"
+    for profile in debug release; do
+        nm_srcsum > "$PROJECT_ROOT/target/aarch64-linux-android/${profile}/nm.srcsum"
+    done
+    echo "==> nm built from source ($(wc -c < "$PROJECT_ROOT/target/aarch64-linux-android/release/nm") bytes)"
+    return 0
+}
+
+mkdir -p "$RELEASE_DIR/debug" "$RELEASE_DIR/release"
+
+if [ "$CLEAN" = true ]; then
+    echo "==> Cleaning old releases"
+    rm -f "$RELEASE_DIR"/debug/0*_NoMount-Module-*.zip "$RELEASE_DIR"/release/0*_NoMount-Module-*.zip
+fi
+
+SCRIPTS=(
+    customize.sh
+    lib.sh
+    lkm-load.sh
+    metamount.sh
+    post-fs-data.sh
+    post-mount.sh
+    service.sh
+    uidscan.sh
+    uidwatch.sh
+    uninstall.sh
+)
+
+declare -A ABI_TARGET=(
+    [arm64-v8a]=aarch64-linux-android
+)
+
+setup_toolchain() {
+    local ndk="${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}"
+    local hostdir=""
+    for h in linux-x86_64 windows-x86_64 darwin-x86_64; do
+        [ -n "$ndk" ] && [ -d "$ndk/toolchains/llvm/prebuilt/$h/bin" ] && hostdir="$h" && break
+    done
+    if [ -z "$ndk" ]; then
+        for c in /opt/android-ndk-r25b "$HOME"/Android/Sdk/ndk/* "$HOME"/android-ndk-* \
+                 "${LOCALAPPDATA:-/nonexistent}"/Android/Sdk/ndk/*; do
+            for h in linux-x86_64 windows-x86_64 darwin-x86_64; do
+                [ -d "$c/toolchains/llvm/prebuilt/$h/bin" ] && ndk="$c" && hostdir="$h"
+            done
+        done
+    fi
+    export NDK_BIN="$ndk/toolchains/llvm/prebuilt/${hostdir:-linux-x86_64}/bin"
+    if [ -z "$ndk" ] || [ ! -d "$NDK_BIN" ]; then
+        echo "fatal: Android NDK not found. Set ANDROID_NDK_HOME." >&2
+        exit 1
+    fi
+    local clang="$NDK_BIN/aarch64-linux-android26-clang"
+    [ "$hostdir" = "windows-x86_64" ] && clang="$clang.cmd"
+    export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$clang"
+    echo "==> NDK: $ndk"
+    CARGO="${CARGO:-cargo}"
+    export PATH="$NDK_BIN:$PATH"
+}
+
+build_rust() {
+    local profile="$1"
+    local cargo_flag=""
+
+    if [ "$profile" = "release" ]; then
+        cargo_flag="--release"
+    fi
+
+    for abi in "${!ABI_TARGET[@]}"; do
+        target="${ABI_TARGET[$abi]}"
+        echo "==> [$profile] Building $abi ($target)"
+        "$CARGO" build --locked --manifest-path "$PROJECT_ROOT/Cargo.toml" \
+            --target "$target" $cargo_flag 2>&1
+    done
+    echo "==> [$profile] All Rust targets built"
+}
+
+verify_binary_version() {
+    local bin="$1" want="$2" got=""
+    if got="$("$bin" version 2>/dev/null)" && [ -n "$got" ]; then
+        case "$got" in
+            *"$want"*) return 0 ;;
+            *) echo "       binary reports: $got" >&2; return 1 ;;
+        esac
+    fi
+    if grep -qaE -- "nomount v${want//./\\.}([^0-9]|\$)" "$bin"; then
+        return 0
+    fi
+    local seen
+    seen="$(grep -aoE '[0-9]+\.[0-9]+\.[0-9]+' "$bin" 2>/dev/null | sort -u | tr '\n' ' ')"
+    echo "       binary contains no \"$want\"; version-shaped literals: ${seen:-<none>}" >&2
+    return 1
+}
+
+package_zip() {
+    local profile="$1"
+    local variant="${2:-lite}"
+    local target_subdir="debug"
+    [ "$profile" = "release" ] && target_subdir="release"
+
+    local suffix=""
+    [ "$profile" = "debug" ] && suffix="-debug"
+
+    # Two variants. "lite" carries no engine modules: it is for a kernel with
+    # NoMount built in, which is every kernel the three OnePlus builders ship,
+    # and those builders match the 00_NoMount-Module-*.zip name - so the LKM
+    # one is deliberately named 01_* to stay out of their way.
+    local out_name="00_NoMount-Module-${VERSION}${suffix}.zip"
+    [ "$variant" = "lkm" ] && out_name="01_NoMount-Module-LKM-${VERSION}${suffix}.zip"
+    local out_path="$RELEASE_DIR/$profile/$out_name"
+    local staging
+    staging="$(mktemp -d)"
+    _staging_active="$staging"
+
+    echo ""
+    echo "==> Packaging $profile: $out_name"
+
+    for script in "${SCRIPTS[@]}"; do
+        local src="$MODULE_DIR/$script"
+        if [ ! -f "$src" ]; then
+            echo "fatal: missing $script" >&2
+            rm -rf "$staging"
+            exit 1
+        fi
+        cp "$src" "$staging/$script"
+    done
+
+    # The loop above fatals on a name in SCRIPTS that is missing from module/. The
+    # reverse - a new module/*.sh nobody added to SCRIPTS - would ship a zip that
+    # installs and is quietly wrong: sha256sums derive from the staging tree so they
+    # cannot see an absence, customize.sh's set_perm calls are [ -f ] guarded, and
+    # CI lints a file that never reached the zip.
+    for src in "$MODULE_DIR"/*.sh; do
+        local base
+        base=$(basename "$src")
+        case " ${SCRIPTS[*]} " in
+            *" $base "*) ;;
+            *)
+                echo "fatal: module/$base exists but is not in SCRIPTS - it would ship missing" >&2
+                rm -rf "$staging"
+                exit 1
+                ;;
+        esac
+    done
+
+    if [ ! -f "$MODULE_DIR/module.prop" ]; then
+        echo "fatal: missing module.prop" >&2
+        rm -rf "$staging"
+        exit 1
+    fi
+    cp "$MODULE_DIR/module.prop" "$staging/module.prop"
+
+    sed -i "s/^version=.*/version=${VERSION}/" "$staging/module.prop"
+
+    local want=${#ABI_TARGET[@]}
+    local found_nomount=0 found_nm=0
+    for abi in "${!ABI_TARGET[@]}"; do
+        local target="${ABI_TARGET[$abi]}"
+        mkdir -p "$staging/bin/$abi"
+
+        local nomount_src="$PROJECT_ROOT/target/$target/$target_subdir/nomount"
+        if [ -f "$nomount_src" ]; then
+            cp "$nomount_src" "$staging/bin/$abi/nomount"; found_nomount=$((found_nomount + 1))
+        elif [ -f "$MODULE_DIR/bin/$abi/nomount" ]; then
+            echo "    !! nomount/$abi: NO built binary in target/$target/$target_subdir - " >&2
+            echo "       packaging the committed prebuilt from module/bin/$abi instead." >&2
+            cp "$MODULE_DIR/bin/$abi/nomount" "$staging/bin/$abi/nomount"; found_nomount=$((found_nomount + 1))
+        fi
+        if [ -f "$staging/bin/$abi/nomount" ]; then
+            verify_binary_version "$staging/bin/$abi/nomount" "$NEW_VERSION" || {
+                echo "fatal: [$profile] bin/$abi/nomount does not report $NEW_VERSION." >&2
+                echo "       The zip would be labelled ${VERSION} around a binary that" >&2
+                echo "       answers something else. Re-run with --build." >&2
+                rm -rf "$staging"
+                exit 1
+            }
+        fi
+
+        local nm_cand nm_stale="" want_sum
+        want_sum="$(nm_srcsum)"
+        for nm_cand in "$PROJECT_ROOT/target/$target/$target_subdir/nm" \
+                       "$MODULE_DIR/bin/$abi/nm"; do
+            [ -f "$nm_cand" ] || continue
+            if [ -f "$nm_cand.srcsum" ]; then
+                if [ "$(cat "$nm_cand.srcsum")" != "$want_sum" ]; then
+                    nm_stale="${nm_stale}${nm_stale:+, }$nm_cand (built from other sources)"
+                    continue
+                fi
+            elif [ "$PROJECT_ROOT/userspace/src/nm.c" -nt "$nm_cand" ] \
+               || [ "$PROJECT_ROOT/userspace/src/nm.h" -nt "$nm_cand" ]; then
+                nm_stale="${nm_stale}${nm_stale:+, }$nm_cand (older than the source)"
+                continue
+            fi
+            cp "$nm_cand" "$staging/bin/$abi/nm"; found_nm=$((found_nm + 1))
+            break
+        done
+        if [ ! -f "$staging/bin/$abi/nm" ] && [ -n "$nm_stale" ]; then
+            echo "fatal: no nm candidate for $abi matches userspace/src/nm.[ch]:" >&2
+            echo "         $nm_stale" >&2
+            echo "       Re-run with --build (zig 0.14.x, or the NDK's clang), or take" >&2
+            echo "       the binary from CI. Packaging the old one would ship an nm that" >&2
+            echo "       does not match the source in this zip." >&2
+            rm -rf "$staging"
+            exit 1
+        fi
+    done
+
+    if [ "$found_nomount" -ne "$want" ] || [ "$found_nm" -ne "$want" ]; then
+        echo "fatal: [$profile] nomount ${found_nomount}/${want}, nm ${found_nm}/${want}" >&2
+        rm -rf "$staging"
+        exit 1
+    fi
+
+    if [ "$variant" = "lkm" ]; then
+    local lkm_src=""
+    if [ -d "$MODULE_DIR/lkm" ]; then
+        lkm_src="$MODULE_DIR/lkm"
+    elif [ -d "$PROJECT_ROOT/staging/lkm" ]; then
+        lkm_src="$PROJECT_ROOT/staging/lkm"
+    fi
+    if [ -n "$lkm_src" ]; then
+        n_ko=$(find "$lkm_src" -name 'nomount-*.ko' | wc -l)
+        if [ "$n_ko" -gt 0 ]; then
+            mkdir -p "$staging/lkm"
+            cp "$lkm_src"/nomount-*.ko "$staging/lkm/"
+            echo "    lkm: $n_ko module(s) -> $(find "$staging/lkm" -name 'nomount-*.ko' -printf '%f ')"
+        else
+            echo "    lkm: directory present but empty - zip carries NO engine modules"
+        fi
+    else
+        echo "    lkm: none bundled - this zip needs a kernel with CONFIG_NOMOUNT=y"
+    fi
+
+    else
+        echo "    lkm: omitted (lite) - for a kernel that has NoMount built in"
+    fi
+
+    # ko-loader ships in BOTH variants. Lite carries no engine module, but it
+    # still honours one dropped at $NM_LKM_DEVICE_KO, and that module may have
+    # been built against a different point release - ko-loader is what makes it
+    # load anyway, by rewriting vermagic to the string the kernel asks for.
+    local loader_src=""
+    for _c in "$MODULE_DIR/bin/ko-loader-arm64" "$PROJECT_ROOT/staging/ko-loader-arm64"; do
+        [ -f "$_c" ] && { loader_src="$_c"; break; }
+    done
+    if [ -n "$loader_src" ]; then
+        install -m 0755 "$loader_src" "$staging/loader"
+        echo "    loader: $(basename "$loader_src")"
+    else
+        echo "    loader: none - module loading falls back to ksud insmod / insmod"
+    fi
+
+    if [ ! -f "$MODULE_DIR/webroot/index.html" ]; then
+        echo "fatal: no module/webroot/index.html - the zip would ship no WebUI." >&2
+        rm -rf "$staging"
+        exit 1
+    fi
+    cp -r "$MODULE_DIR/webroot" "$staging/webroot"
+
+    missing=0
+    while IFS= read -r ref; do
+        case "$ref" in ''|*://*|data:*|'#'*) continue ;; esac
+        if [ ! -f "$staging/webroot/$ref" ]; then
+            echo "fatal: webroot/index.html references $ref, which is not in the zip." >&2
+            missing=$((missing + 1))
+        fi
+    done <<REFS
+$(grep -oE '(src|href)="[^"]+"' "$staging/webroot/index.html" | cut -d'"' -f2)
+REFS
+    if [ "$missing" -ne 0 ]; then
+        rm -rf "$staging"
+        exit 1
+    fi
+
+    stamp_target=""
+    stamp_n=0
+    for f in "$staging/webroot/index.html" "$staging"/webroot/js/*.js; do
+        [ -f "$f" ] || continue
+        if grep -q "const SUITE_VERSION = " "$f"; then
+            stamp_target=$f
+            stamp_n=$((stamp_n + 1))
+        fi
+    done
+    if [ "$stamp_n" -ne 1 ]; then
+        echo "fatal: $stamp_n webroot files carry 'const SUITE_VERSION =' - expected exactly 1." >&2
+        rm -rf "$staging"
+        exit 1
+    fi
+    stamp_name=${stamp_target#"$staging/"}
+
+    sed -i "s/const SUITE_VERSION = \"[^\"]*\"/const SUITE_VERSION = \"${VERSION}\"/" \
+        "$stamp_target"
+    sed -i "s/const SUITE_COMMIT = \"[^\"]*\"/const SUITE_COMMIT = \"${BUILD_COMMIT}\"/" \
+        "$stamp_target"
+    if ! grep -q "const SUITE_VERSION = \"${VERSION}\"" "$stamp_target"; then
+        echo "fatal: could not stamp SUITE_VERSION into $stamp_name" >&2
+        rm -rf "$staging"
+        exit 1
+    fi
+    sed -i "s/const SUITE_PROFILE = \"[^\"]*\"/const SUITE_PROFILE = \"${profile}\"/" \
+        "$stamp_target"
+    if ! grep -q "const SUITE_PROFILE = \"${profile}\"" "$stamp_target"; then
+        echo "fatal: could not stamp SUITE_PROFILE into $stamp_name" >&2
+        rm -rf "$staging"
+        exit 1
+    fi
+    if ! grep -q "const SUITE_COMMIT = \"${BUILD_COMMIT}\"" "$stamp_target"; then
+        echo "fatal: could not stamp SUITE_COMMIT into $stamp_name" >&2
+        rm -rf "$staging"
+        exit 1
+    fi
+
+    mkdir -p "$staging/META-INF/com/google/android"
+    cat > "$staging/META-INF/com/google/android/update-binary" << 'UPDATER'
+#!/sbin/sh
+
+OUTFD=/proc/self/fd/$2
+ZIPFILE="$3"
+
+ui_print() { echo "ui_print $1" >> $OUTFD; echo "ui_print" >> $OUTFD; }
+abort() { ui_print "$1"; rm -rf "$MODPATH"; exit 1; }
+grep_prop() {
+    _gp_re="s/^$1=//p"
+    shift
+    sed -n "$_gp_re" "$@" 2>/dev/null | head -n 1
+}
+set_perm() {
+    chown "$2:$3" "$1" 2>/dev/null
+    chmod "$4" "$1" 2>/dev/null
+    if [ -n "$5" ]; then
+        chcon "$5" "$1" 2>/dev/null
+    else
+        chcon u:object_r:system_file:s0 "$1" 2>/dev/null
+    fi
+    return 0
+}
+set_perm_recursive() {
+    find "$1" -type d 2>/dev/null | while IFS= read -r _spr; do
+        set_perm "$_spr" "$2" "$3" "$4" "$6"
+    done
+    find "$1" -type f -o -type l 2>/dev/null | while IFS= read -r _spr; do
+        set_perm "$_spr" "$2" "$3" "$5" "$6"
+    done
+    return 0
+}
+
+MODPATH="${MODPATH:-/data/adb/modules_update/meta-nomount}"
+rm -rf "$MODPATH"
+mkdir -p "$MODPATH" || { ui_print "! cannot create $MODPATH"; exit 1; }
+
+if ! unzip -o "$ZIPFILE" -x 'META-INF/*' -d "$MODPATH" >&2; then
+    ui_print "*********************************************************"
+    ui_print "! Unpacking the zip FAILED - nothing was installed."
+    ui_print "! The download is truncated or the storage is full."
+    ui_print "*********************************************************"
+    rm -rf "$MODPATH"
+    exit 1
+fi
+
+chmod 755 "$MODPATH"/*.sh "$MODPATH"/bin/*/nomount "$MODPATH"/bin/*/nm 2>/dev/null
+
+ui_print "- Unpacked via recovery"
+
+if [ -f "$MODPATH/customize.sh" ]; then
+    . "$MODPATH/customize.sh"
+else
+    abort "! customize.sh is missing from this zip - the install cannot be verified or labelled. Re-download the zip."
+fi
+
+exit 0
+UPDATER
+    if ! head -n 1 "$staging/META-INF/com/google/android/update-binary" | grep -q '^#!'; then
+        echo "fatal: the generated update-binary has no shebang - recovery execv()s it, so the flash fails with ENOEXEC and no message." >&2
+        rm -rf "$staging"
+        exit 1
+    fi
+    if ! sh -n "$staging/META-INF/com/google/android/update-binary"; then
+        echo "fatal: the generated update-binary is not valid shell - the zip would fail at flash time, on device, with no way to see why." >&2
+        rm -rf "$staging"
+        exit 1
+    fi
+    chmod 0755 "$staging/META-INF/com/google/android/update-binary"
+    echo "" > "$staging/META-INF/com/google/android/updater-script"
+
+    (
+        cd "$staging"
+        find . -type f \
+            ! -path './META-INF/*' \
+            ! -name 'nomount.sha256sums' \
+            -print0 | sort -z | xargs -0 sha256sum \
+            | sed 's/^\([0-9a-f]\{64\}\) \*/\1  /' > nomount.sha256sums
+    )
+    if grep -q '^[0-9a-f]\{64\} \*' "$staging/nomount.sha256sums"; then
+        echo "fatal: nomount.sha256sums is in binary mode (<hash> *path)." >&2
+        echo "       Android's toybox cannot verify that form." >&2
+        rm -rf "$staging"
+        exit 1
+    fi
+    echo "    Sums:    $(wc -l < "$staging/nomount.sha256sums") files hashed"
+
+    rm -f "$out_path"
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "fatal: python3 is required to build the archive (scripts/mkzip.py)." >&2
+        rm -rf "$staging"
+        exit 1
+    fi
+    python3 "$SCRIPT_DIR/mkzip.py" "$staging" "$out_path"
+    echo "    Archive: mkzip.py (reproducible)"
+    rm -rf "$staging"
+
+    echo "    Output:  $out_path"
+    echo "    Size:    $(du -h "$out_path" | cut -f1)"
+    echo "    Bins:    nomount+nm x${want} ($(printf '%s ' "${!ABI_TARGET[@]}"))"
+    echo "    WebUI:   present"
+}
+
+echo "==> NoMount $VERSION build pipeline"
+echo ""
+
+if [ "$BUILD" = true ]; then
+    setup_toolchain
+
+    build_nm || _nmrc=$?
+    case "${_nmrc:-0}" in
+        0) ;;
+        2) echo "fatal: a cross compiler is on path but compiling userspace/src/nm.c FAILED." >&2
+           echo "       Fix the compile error; shipping the previous prebuilt would" >&2
+           echo "       package a binary that does not match the source in this zip." >&2
+           exit 1 ;;
+        *) echo "==> nm: no zig and no NDK clang; a prebuilt will be used only if it is" >&2
+           echo "    newer than userspace/src/nm.[ch] -- otherwise packaging stops below." >&2 ;;
+    esac
+
+    build_rust "debug"
+    build_rust "release"
+fi
+
+package_zip "debug"   lite
+package_zip "release" lite
+package_zip "debug"   lkm
+package_zip "release" lkm
+
+echo ""
+echo "==> Build complete"
+echo "    Debug:   $RELEASE_DIR/debug/00_NoMount-Module-${VERSION}-debug.zip"
+echo "    Release: $RELEASE_DIR/release/00_NoMount-Module-${VERSION}.zip"
+echo "    LKM:     $RELEASE_DIR/release/01_NoMount-Module-LKM-${VERSION}.zip"
+
+if [ "$DEPLOY" = true ]; then
+    if [ "$DEPLOY_PROFILE" = "release" ]; then
+        ZIP="$RELEASE_DIR/release/00_NoMount-Module-${VERSION}.zip"
+    else
+        ZIP="$RELEASE_DIR/debug/00_NoMount-Module-${VERSION}-debug.zip"
+    fi
+    if [ ! -f "$ZIP" ]; then
+        echo "fatal: ${DEPLOY_PROFILE} zip not found at $ZIP" >&2
+        exit 1
+    fi
+
+    if ! adb devices 2>/dev/null | grep -q 'device$'; then
+        echo "fatal: no adb device connected" >&2
+        exit 1
+    fi
+
+    REMOTE="/data/local/tmp/nomount-deploy.zip"
+    echo "==> Deploying $ZIP to device"
+
+    _adb_local="$ZIP"
+    case "$(uname -s 2>/dev/null)" in
+        MINGW*|MSYS*|CYGWIN*)
+            export MSYS_NO_PATHCONV=1
+            if command -v cygpath >/dev/null 2>&1; then
+                _adb_local="$(cygpath -w "$ZIP")"
+            fi
+            ;;
+    esac
+
+    adb push "$_adb_local" "$REMOTE" || { echo "fatal: adb push failed" >&2; exit 1; }
+
+    _dev_sh() {
+        _dev_out=$(adb shell "su -c '$1'"'; echo "__nmrc=$?"' 2>&1 | tr -d "\r")
+        printf '%s' "$_dev_out" | sed "/^__nmrc=/d"
+        case "$_dev_out" in
+            *__nmrc=0*) return 0 ;;
+            *)          return 1 ;;
+        esac
+    }
+
+    if _dev_sh "[ -x /data/adb/ksu/bin/ksud ]" >/dev/null 2>&1; then
+        _mgr="ksud"; _cmd="/data/adb/ksu/bin/ksud module install $REMOTE"
+    elif _dev_sh "[ -x /data/adb/ap/bin/apd ]" >/dev/null 2>&1; then
+        _mgr="apd";  _cmd="/data/adb/ap/bin/apd module install $REMOTE"
+    elif _dev_sh "command -v magisk" >/dev/null 2>&1; then
+        _mgr="magisk"; _cmd="magisk --install-module $REMOTE"
+    else
+        echo "fatal: no root manager found on the device (no ksud, apd or magisk)." >&2
+        echo "       Nothing was installed." >&2
+        adb shell "rm -f $REMOTE" >/dev/null 2>&1
+        exit 1
+    fi
+
+    echo "==> Installing via $_mgr"
+    if ! _dev_sh "$_cmd"; then
+        echo "fatal: $_mgr module install FAILED - nothing was installed." >&2
+        adb shell "rm -f $REMOTE" >/dev/null 2>&1
+        exit 1
+    fi
+    adb shell "rm -f $REMOTE" >/dev/null 2>&1
+    echo "==> Module installed via $_mgr"
+
+    if [ "$REBOOT" = true ]; then
+        echo "==> Rebooting device"
+        adb reboot
+    fi
+fi
