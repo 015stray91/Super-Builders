@@ -40,7 +40,7 @@ jobs:
         run: |
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next
           if ! grep -q "X86_FEATURE_INDIRECT_SAFE" arch/x86/include/asm/cpufeatures.h; then
-          sed -i 's/!boot_cpu_has(X86_FEATURE_INDIRECT_SAFE)/0/g' drivers/kernelsu/core/init.c
+            sed -i 's/!boot_cpu_has(X86_FEATURE_INDIRECT_SAFE)/0/g' drivers/kernelsu/core/init.c
           fi
 
       - name: Apply Super-Builders Patches
@@ -54,7 +54,7 @@ jobs:
             done
           fi
 
-      - name: Configure Kernel (DarkMatter + KSU-Next + SUSFS + NetHunter)
+      - name: Configure Kernel (DarkMatter + KSU-Next + SUSFS + NetHunter + VivoBook Go)
         working-directory: kernel_src
         run: |
           if [ -f "arch/x86/configs/darkmatter_defconfig" ]; then
@@ -63,43 +63,43 @@ jobs:
             make ARCH=x86_64 x86_64_defconfig
           fi
 
-            chmod +x  ./srcripts/config
-          ./scripts/config ./scripts/config --enable CONFIG_KSU \
-                           --enable CONFIG_KSU_X86_PATCH_SYSCALL_DISPATCHER \
-                           --enable CONFIG_KSU_SUSFS \
-                           --enable CONFIG_ZEROMOUNT \
-                           --enable CONFIG_HYBRID_MOUNT \
-                           --enable CONFIG_OVERLAY_FS \
-                           --enable CONFIG_KERNEL_LZ4 \
-                           --enable CONFIG_CRYPTO_LZ4 \
-                           --enable CONFIG_ZRAM \
-                           --enable CONFIG_ZRAM_DEF_COMP_LZ4 \
-                           --enable CONFIG_KPROBES \
-                           --enable CONFIG_HAVE_KPROBES \
-                           --enable CONFIG_KPROBE_EVENTS \
-                           --enable CONFIG_MAC80211 \
-                           --enable CONFIG_CFG80211_WEXT \
-                           --enable CONFIG_USB_HID \
-                           --enable CONFIG_HID_GENERIC \
-                           --enable CONFIG_USB_GADGET \
-                           --enable CONFIG_USB_CONFIGFS \
-                           --enable CONFIG_USB_CONFIGFS_F_HID \
-                           --enable CONFIG_BRIDGE \
-                           --enable CONFIG_TUN \
-                           --enable CONFIG_ASUS_WMI \
-                           --enable CONFIG_ASUS_NB_WMI \
-                           --enable CONFIG_DRM_AMDGPU \
-                           --enable CONFIG_DRM_I915 \
-                           --enable CONFIG_NVME_CORE \
-                           --enable CONFIG_BLK_DEV_NVME \
-                           --enable CONFIG_I2C_HID_ACPI \
-                           --enable CONFIG_HID_MULTITOUCH \
-                           --enable CONFIG_PINCTRL_AMD \
-                           --module CONFIG_RTW88 \
-                           --module CONFIG_RTW89 \
-                           --module CONFIG_MT7921E \
-                           --module CONFIG_IWLWIFI \
-                           --module CONFIG_BT_HCIBTUSB
+          cat >> .config << 'EOF'
+          CONFIG_KSU=y
+          CONFIG_KSU_SUSFS=y
+          CONFIG_ZEROMOUNT=y
+          CONFIG_HYBRID_MOUNT=y
+          CONFIG_OVERLAY_FS=y
+          CONFIG_KERNEL_LZ4=y
+          CONFIG_CRYPTO_LZ4=y
+          CONFIG_ZRAM=y
+          CONFIG_ZRAM_DEF_COMP_LZ4=y
+          CONFIG_KPROBES=y
+          CONFIG_HAVE_KPROBES=y
+          CONFIG_KPROBE_EVENTS=y
+          CONFIG_MAC80211=y
+          CONFIG_CFG80211_WEXT=y
+          CONFIG_USB_HID=y
+          CONFIG_HID_GENERIC=y
+          CONFIG_USB_GADGET=y
+          CONFIG_USB_CONFIGFS=y
+          CONFIG_USB_CONFIGFS_F_HID=y
+          CONFIG_BRIDGE=y
+          CONFIG_TUN=y
+          CONFIG_ASUS_WMI=y
+          CONFIG_ASUS_NB_WMI=y
+          CONFIG_DRM_AMDGPU=y
+          CONFIG_DRM_I915=y
+          CONFIG_NVME_CORE=y
+          CONFIG_BLK_DEV_NVME=y
+          CONFIG_I2C_HID_ACPI=y
+          CONFIG_HID_MULTITOUCH=y
+          CONFIG_PINCTRL_AMD=y
+          CONFIG_RTW88=m
+          CONFIG_RTW89=m
+          CONFIG_MT7921E=m
+          CONFIG_IWLWIFI=m
+          CONFIG_BT_HCIBTUSB=m
+          EOF
 
           make ARCH=x86_64 olddefconfig
 
@@ -110,6 +110,16 @@ jobs:
           mkdir -p ../out/modules
           make ARCH=x86_64 INSTALL_MOD_PATH=../out/modules modules_install
           cp arch/x86/boot/bzImage ../out/kernel
+
+      - name: Build kpatch_1
+        run: |
+          git clone --depth=1 https://github.com/015stray91/kpatch_1.git
+          cd kpatch_1
+          KVER=$(make -C ../kernel_src -s kernelrelease)
+          make BUILD_KMOD=yes KVER="$KVER" || true
+          mkdir -p ../out/kpatch
+          cp -f kpatch/kpatch ../out/kpatch/ 2>/dev/null || true
+          cp -f kmod/core/kpatch.ko ../out/kpatch/ 2>/dev/null || true
 
       - name: Upload Kernel & Modules Artifact
         uses: actions/upload-artifact@v4
