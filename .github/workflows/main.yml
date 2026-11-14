@@ -13,6 +13,7 @@ on:
         options:
           - a12-5-10
           - genevn
+          - darkmatter-6.8
           - all
         default: "a12-5-10"
       ksu_variant:
@@ -27,6 +28,7 @@ on:
         options:
           - genevn-g
           - lake
+          - darkmatter-vivobook
         default: "genevn-g"
       kernel_branch:
         description: "kernel-msm-1 branch (genevn only)"
@@ -56,3 +58,8 @@ jobs:
     with:
       device_codename: ${{ inputs.device_codename }}
       kernel_branch: ${{ inputs.kernel_branch }}
+
+  build-darkmatter:
+    if: ${{ inputs.kernel_build_version == 'darkmatter-6.8' || inputs.device_codename == 'darkmatter-vivobook' }}
+    uses: ./.github/workflows/build-darkmatter-ksu-nh.yml
+    secrets: inherit

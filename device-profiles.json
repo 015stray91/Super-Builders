@@ -22,4 +22,22 @@
       "add_overlayfs": true,
       "add_kpm": true,
       "add_nethunter": true
-    
+    },
+    "darkmatter-vivobook": {
+      "name": "ASUS VivoBook Go 14/15 (DarkMatter NetHunter)",
+      "codename": "darkmatter-amd64",
+      "android_version": "android14",
+      "kernel_version": "6.8",
+      "sub_level": "12",
+      "kernel_source": "https://github.com/015stray91/Darkmatter-kernel.git",
+      "kernel_branch": "master",
+      "defconfig": "x86_64_defconfig",
+      "add_susfs": true,
+      "add_zeromount": true,
+      "add_zram": true,
+      "add_overlayfs": true,
+      "add_kpm": false,
+      "add_nethunter": true
+    }
+  }
+}

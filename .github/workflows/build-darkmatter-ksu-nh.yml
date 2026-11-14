@@ -1,6 +1,7 @@
 name: Build DarkMatter KSU-Next + NetHunter Kernel
 
 on:
+  workflow_call:
   workflow_dispatch:
     inputs:
       kernel_version:
@@ -39,6 +40,17 @@ jobs:
         run: |
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next
 
+      - name: Apply Super-Builders Patches
+        working-directory: kernel_src
+        run: |
+          if [ -d "../super-builders/patches" ]; then
+            for p in ../super-builders/patches/*.patch; do
+              [ -e "$p" ] || continue
+              echo "Applying $p..."
+              git apply "$p" || patch -p1 < "$p" || true
+            done
+          fi
+
       - name: Configure Kernel (DarkMatter + KSU-Next + SUSFS + NetHunter)
         working-directory: kernel_src
         run: |
@@ -50,6 +62,13 @@ jobs:
 
           ./scripts/config --enable CONFIG_KSU \
                            --enable CONFIG_KSU_SUSFS \
+                           --enable CONFIG_ZEROMOUNT \
+                           --enable CONFIG_HYBRID_MOUNT \
+                           --enable CONFIG_OVERLAY_FS \
+                           --enable CONFIG_KERNEL_LZ4 \
+                           --enable CONFIG_CRYPTO_LZ4 \
+                           --enable CONFIG_ZRAM \
+                           --enable CONFIG_ZRAM_DEF_COMP_LZ4 \
                            --enable CONFIG_KPROBES \
                            --enable CONFIG_HAVE_KPROBES \
                            --enable CONFIG_KPROBE_EVENTS \
