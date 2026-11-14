@@ -39,6 +39,9 @@ jobs:
         working-directory: kernel_src
         run: |
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next
+          if ! grep -q "X86_FEATURE_INDIRECT_SAFE" arch/x86/include/asm/cpufeatures.h; then
+          sed -i 's/!boot_cpu_has(X86_FEATURE_INDIRECT_SAFE)/0/g' drivers/kernelsu/core/init.c
+          fi
 
       - name: Apply Super-Builders Patches
         working-directory: kernel_src
