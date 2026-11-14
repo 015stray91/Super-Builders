@@ -41,8 +41,7 @@ jobs:
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next
           if ! grep -q "X86_FEATURE_INDIRECT_SAFE" arch/x86/include/asm/cpufeatures.h; then
             sed -i 's/!boot_cpu_has(X86_FEATURE_INDIRECT_SAFE)/0/g' drivers/kernelsu/core/init.c
-            sed -i 's/#error "FATAL: Your kernel is missing the indirect syscall bypass patches!"/\/\/ bypassed/' drivers/kernelsu/core/init.c
-
+            
       - name: Apply Super-Builders Patches
         working-directory: kernel_src
         run: |
@@ -65,14 +64,16 @@ jobs:
 
           cat >> .config << 'EOF'
           CONFIG_KSU=y
+          CONFIG_KSU_X86_PATCH_SYSCALL_DISPATCHER=y.
           CONFIG_KSU_SUSFS=y
           CONFIG_ZEROMOUNT=y
           CONFIG_HYBRID_MOUNT=y
           CONFIG_OVERLAY_FS=y
-          CONFIG_KERNEL_LZ4=y
-          CONFIG_CRYPTO_LZ4=y
+          CONFIG_KERNEL_ZSTD=y
+          CONFIG_CRYPTO_ZSTD=y
           CONFIG_ZRAM=y
-          CONFIG_ZRAM_DEF_COMP_LZ4=y
+          CONFIG_ZSTD
+          CONFIG_ZRAM_DEF_COMP_ZSTD=y
           CONFIG_KPROBES=y
           CONFIG_HAVE_KPROBES=y
           CONFIG_KPROBE_EVENTS=y
