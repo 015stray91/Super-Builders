@@ -1,0 +1,447 @@
+#!/bin/bash
+##############################################################################################
+# tigress -- front-end wrapper for the Tigress C obfuscator.
+#
+# This script prepares and runs a single invocation of "cilly" (the CIL driver
+# that applies the Tigress transformations). It works out the host system,
+# resolves the target environment and compiler from the user's options and/or
+# sensible defaults, locates the machine-dependent type description, and then
+# hands a fully-formed argument list to cilly.
+#
+# Principal variables:
+#   ARCH                  host architecture, normalised: x86_64 | armv7 | armv8
+#   OS_NAME               host operating system:         Darwin | Linux | Windows
+#   CC_OPTIONS            extra preprocessor/compiler flags needed on this host
+#   BIN_DIR               per-host directory holding cilly and the helper exes
+#   MACHDEPS_DIR          directory of the machine-dependent type descriptions
+#
+#   COMPILER_PATH         the C compiler to use, as a command name or path
+#                         (e.g. clang, gcc, /opt/homebrew/bin/gcc-16, cl, emcc)
+#   ENV_ARCH  ENV_OS  ENV_COMPILER  ENV_COMPILER_VERSION
+#                         the fields of --Environment=ARCH:OS:COMPILER:VERSION,
+#                         where COMPILER is one of Gcc | Clang | Msvc | Emcc and
+#                         VERSION is the compiler's "major.minor".
+#   MACHINE_SPEC_FILE     JSON description of the target machine-dependent types
+#
+# Resolution rules:
+#   * If --Environment is given it supplies ENV_ARCH, ENV_OS, ENV_COMPILER and,
+#     optionally, ENV_COMPILER_VERSION. Otherwise ENV_ARCH/ENV_OS default to the
+#     host, and ENV_COMPILER to the host's usual compiler (Darwin->Clang,
+#     Windows->Msvc, Linux->Gcc).
+#   * If --Compiler is given it supplies COMPILER_PATH. Otherwise COMPILER_PATH
+#     is derived from ENV_COMPILER (Gcc->gcc, Clang->clang, Msvc->cl, Emcc->emcc).
+#     If only --Compiler is given, ENV_COMPILER is derived from it.
+#   * ENV_COMPILER_VERSION, when not supplied in --Environment, is detected by
+#     running "${COMPILER_PATH} --version" (falling back to "1"). It matters
+#     because Tigress gates some code generation on the compiler version.
+#
+# The "Settings" block printed just before cilly runs is read back out of the
+# exact argument list handed to cilly, so what is reported is what is used.
+##############################################################################################
+
+##############################################################################################
+# Helper functions
+##############################################################################################
+
+# Print a compiler's "major.minor" version, parsed from its "--version" banner
+# (e.g. "Apple clang version 17.0.0 ..." -> "17.0"). Prints nothing on failure.
+detect_compiler_version() {
+    "$1" --version 2>/dev/null | head -n 1 \
+        | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n 1 | cut -d "." -f 1-2
+}
+
+# Map a compiler command/path to its ENV_COMPILER family, or "" if not obvious.
+compiler_family_of() {
+    case "$1" in
+        *[Gg][Cc][Cc]*)         echo Gcc   ;;
+        *[Cc][Ll][Aa][Nn][Gg]*) echo Clang ;;
+        *[Ee][Mm][Cc][Cc]*)     echo Emcc  ;;
+        *) echo "" ;;
+    esac
+}
+
+# Map an ENV_COMPILER family to its usual command name.
+compiler_name_of_family() {
+    case "$1" in
+        Gcc)   echo gcc   ;;
+        Clang) echo clang ;;
+        Msvc)  echo cl    ;;
+        Emcc)  echo emcc  ;;
+        *)     echo ""    ;;
+    esac
+}
+
+# The host's default compiler family.
+platform_default_compiler() {
+    case "$OS_NAME" in
+        Darwin)  echo Clang ;;
+        Windows) echo Msvc  ;;
+        *)       echo Gcc   ;;
+    esac
+}
+
+##############################################################################################
+# 1. Help / no arguments: print a pointer and exit (nothing else is needed)
+##############################################################################################
+
+if [ "$1" == "--help" ] || [ "$1" == "--h" ] || [ "$1" == "-h" ] || [ "$1" == "-help" ] || [ -z "$1" ]
+then
+   echo "For help on how to run Tigress, see https://tigress.wtf/tigress-quickstart.html"
+   exit 0
+fi
+
+##############################################################################################
+# 2. Require TIGRESS_HOME
+##############################################################################################
+
+#SET-TIGRESS_HOME-HERE
+
+if [ -z "$TIGRESS_HOME" ]
+then
+   echo "<<Tigress>> Please set the TIGRESS_HOME environment variable to the directory of the version of Tigress that you want to run."
+   echo "<<Tigress>>   For example:"
+   echo "<<Tigress>>      $ export TIGRESS_HOME=/home/alice/bin/tigress/4.1.0"
+   echo "<<Tigress>>   Also make sure that this directory is on your PATH:"
+   echo '<<Tigress>>      $ echo $PATH'
+   echo "<<Tigress>>      /usr/bin:/usr/local/bin:.../home/alice/bin/tigress/4.1.0:..."
+   exit -1
+fi
+
+##############################################################################################
+# 3. Detect the host system: OS_NAME, ARCH, CC_OPTIONS, BIN_DIR
+##############################################################################################
+
+if ! command -v uname &> /dev/null
+then
+   echo "<<Tigress> Can't find 'uname'. Make sure '/usr/bin' (Darwin) or '/bin' (Linux) is on your path."
+   exit -1
+fi
+
+uname_o=`{ uname -o 2> /dev/null || uname -s; } | sed -e 's/GNU\/Linux/Linux/g' | sed -e 's/\///g'`
+uname_s=$uname_o
+uname_m=`uname -m`
+
+CC_OPTIONS=""
+
+case $uname_o in
+     Darwin)
+        CC_OPTIONS="$CC_OPTIONS -fgnu89-inline -Wno-builtin-requires-header"
+        # Clang defines __BLOCKS__ by default on Darwin, exposing block-pointer
+        # (^) declarations in system headers that CIL's parser cannot handle.
+        # Tigress does not support Clang blocks, so suppress them here. Harmless
+        # for gcc (undefining an undefined macro is a no-op).
+        CC_OPTIONS="$CC_OPTIONS -U__BLOCKS__"
+        OS_NAME=Darwin
+        ;;
+     Linux)
+        OS_NAME=Linux
+        ;;
+     Cygwin)
+        OS_IS_CYGWIN=1
+        OS_NAME=Windows
+        ;;
+     *)
+        echo "<<Tigress>> 'uname -s' returned $uname_s. Tigress has been tested only on Darwin, Linux, and Cygwin/Windows."
+        exit -1
+        ;;
+esac
+
+# See https://en.wikipedia.org/wiki/Uname
+case $uname_m in
+     i386|i686|x86)
+        echo "<<Tigress>> Tigress only runs on 64-bit machines. 'uname -m' returned $uname_m which indicates you are running on a 32-bit machine."
+        echo "<<Tigress>>    You can, however, cross-compile, running Tigress on a 64-bit machine and generate code for a 32-bit architecture."
+        exit -1
+        ;;
+     x86_64|amd64|i686-64)
+        ARCH=x86_64
+        ;;
+     armv6l)
+        # We're hoping v6 code will run on v7.
+        ARCH=armv7
+        ;;
+     armv7l|armv7|armel|arm)
+        ARCH=armv7
+        ;;
+     armv8l|armv8|arm64|aarch64_be|aarch64|armv8b)
+        ARCH=armv8
+        ;;
+     *)
+        echo "<<Tigress>> 'uname -m' returned $uname_m. This is an architecture I don't recognize."
+        echo "<<Tigress>>    Tigress only runs on x86_64 and armv7/armv8 architectures. If you're running on"
+        echo "<<Tigress>>    one of these architectures but your 'uname -m' returns some exotic string,"
+        echo "<<Tigress>>    you can edit this Tigress script which should be installed at '$TIGRESS_HOME/tigress'."
+        exit -1
+        ;;
+esac
+
+BIN_DIR=$TIGRESS_HOME/$uname_s"-"$ARCH
+MACHDEPS_DIR=$TIGRESS_HOME/machdeps_json
+
+##############################################################################################
+# 4. Verify the Tigress installation: fail fast if anything essential is missing.
+##############################################################################################
+
+if [ ! -d "$BIN_DIR" ]
+then
+   echo "<<Tigress>> The per-host directory '$BIN_DIR' does not exist. Your Tigress installation looks incomplete."
+   exit -1
+fi
+if [ ! -x "$BIN_DIR/cilly" ]
+then
+   echo "<<Tigress>> File '$BIN_DIR/cilly' does not exist or is not executable. Try 'chmod a+rx $BIN_DIR/cilly'."
+   exit -1
+fi
+if [ ! -x "$BIN_DIR/envToFilename_exe.exe" ]
+then
+   echo "<<Tigress>> File '$BIN_DIR/envToFilename_exe.exe' does not exist or is not executable. Your Tigress installation looks incomplete."
+   exit -1
+fi
+if [ ! -d "$MACHDEPS_DIR" ]
+then
+   echo "<<Tigress>> The machine-dependent types directory '$MACHDEPS_DIR' does not exist. Your Tigress installation looks incomplete."
+   exit -1
+fi
+
+##############################################################################################
+# 5. Version / License: cilly holds the text, so build a minimal command line and let it run.
+#    META_QUERY suppresses the Settings report for these informational queries.
+##############################################################################################
+
+META_QUERY=
+if [ "$1" == "--Version" ] || [ "$1" == "--version" ] || [ "$1" == "--License" ] || [ "$1" == "--license" ]
+then
+   FOO=`mktemp /tmp/foo_XXXX`.c
+   OUT=`mktemp /tmp/foo_XXXX`.c
+   echo "int main(){}" > $FOO
+   echo "int main(){}" > $OUT
+   set -- "$1" "--Transform=Ident" "$FOO" "--out=$OUT"
+   META_QUERY=1
+fi
+
+##############################################################################################
+# 6. Require --out=<file>.c
+##############################################################################################
+
+hasout=0
+for x; do
+  if [[ $x == "--out="* ]]; then hasout=1; break; fi
+done
+
+if [ "$hasout" = 0 ]
+then
+   echo "<<Tigress>> Tigress requires that you provide the --out=<file>.c argument."
+   exit -1
+fi
+
+##############################################################################################
+# 6b. Require that every input file exists, and that at least one is given. A Tigress
+#     input is a source file identified by extension, exactly as the underlying driver
+#     (cilly) identifies sources: .c/.cc/.cpp are C source and .i is already
+#     preprocessed. A .h header is NOT a source (cilly does not obfuscate it), so it
+#     is deliberately not recognised here. Keying off the extension -- rather than
+#     trying to enumerate every gcc/clang option that takes a separate operand (there
+#     are dozens, they differ between the compilers, and they change across versions)
+#     -- means an option operand with no source extension (e.g. "armv8" in "-D armv8",
+#     a "-I" directory, a "-framework" name, a "-L" path) is never mistaken for an
+#     input, whatever the compiler. The only operands that *can* look like a source
+#     (-o's output, -include/-imacros headers) are skipped explicitly.
+##############################################################################################
+
+if [ -z "$META_QUERY" ]
+then
+   ninputs=0
+   missing=0
+   prev=
+   for x; do
+      # Skip the operand of an option whose argument can itself look like a
+      # C source file but is not a Tigress input.
+      case "$prev" in
+         -o|-include|-imacros) prev="$x"; continue ;;
+      esac
+      prev="$x"
+
+      case "$x" in
+        -*) ;;                        # options (incl. --out=foo.c) are not inputs
+        *.c|*.cc|*.cpp|*.i)           # a source file cilly compiles: this is an input
+           ninputs=$((ninputs + 1))
+           if [ ! -f "$x" ]
+           then
+              echo "<<Tigress>> Input file '$x' does not exist."
+              missing=1
+           fi
+           ;;
+        *) ;;                         # anything else (e.g. a -D or -I operand, or a .h) is ignored
+     esac
+   done
+   if [ "$ninputs" = 0 ]
+   then
+      echo "<<Tigress>> Tigress requires at least one input C file."
+      exit -1
+   fi
+   if [ "$missing" != 0 ]
+   then
+      exit -1
+   fi
+fi
+
+##############################################################################################
+# 7. Parse and validate --Environment (if the user supplied one). Last one wins,
+#    matching cilly's own precedence.
+##############################################################################################
+
+HAS_ENV=
+ENV_ARCH=; ENV_OS=; ENV_COMPILER=; ENV_COMPILER_VERSION=
+for x; do
+  if [[ $x = "--Environment="* ]]
+  then
+     HAS_ENV=1
+     IFS=: read -r ENV_ARCH ENV_OS ENV_COMPILER ENV_COMPILER_VERSION _ <<< "${x#--Environment=}"
+  fi
+done
+
+if [ -n "$HAS_ENV" ] && { [ -z "$ENV_ARCH" ] || [ -z "$ENV_OS" ] || [ -z "$ENV_COMPILER" ]; }
+then
+   echo "<<Tigress>> Error: malformed --Environment=\"${ENV_ARCH}:${ENV_OS}:${ENV_COMPILER}:${ENV_COMPILER_VERSION}\"."
+   echo "<<Tigress>>   Expected ARCH:OS:COMPILER[:VERSION], e.g. armv8:Darwin:Clang:12.0"
+   echo "<<Tigress>>   (COMPILER is one of Gcc, Clang, Msvc, Emcc)."
+   exit 1
+fi
+
+##############################################################################################
+# 8. Parse --Compiler (if the user supplied one). Last one wins.
+##############################################################################################
+
+COMPILER_PATH=
+for x; do
+  if [[ $x = "--Compiler="* ]]; then COMPILER_PATH="${x#--Compiler=}"; fi
+done
+
+##############################################################################################
+# 9. Derive whatever the user did not give: environment, compiler, version.
+#    Then confirm the compiler exists.
+##############################################################################################
+
+# Default the target arch/os to the host when no --Environment was given.
+if [ -z "$HAS_ENV" ]
+then
+   ENV_ARCH=$ARCH
+   ENV_OS=$OS_NAME
+fi
+
+# Resolve COMPILER_PATH and ENV_COMPILER from each other, or from host defaults.
+if [ -n "$ENV_COMPILER" ] && [ -n "$COMPILER_PATH" ]
+then
+   family=`compiler_family_of "$COMPILER_PATH"`
+   if [ -n "$family" ] && [ "$family" != "$ENV_COMPILER" ]
+   then
+      echo "<<Tigress>> Warning: Environment string specifies ${ENV_COMPILER}, but specified compiler, ${COMPILER_PATH}, does not appear to be ${ENV_COMPILER}."
+   fi
+elif [ -n "$ENV_COMPILER" ]
+then
+   COMPILER_PATH=`compiler_name_of_family "$ENV_COMPILER"`
+elif [ -n "$COMPILER_PATH" ]
+then
+   family=`compiler_family_of "$COMPILER_PATH"`
+   if [ -z "$family" ]; then family=`platform_default_compiler`; fi
+   ENV_COMPILER=$family
+else
+   ENV_COMPILER=`platform_default_compiler`
+   COMPILER_PATH=`compiler_name_of_family "$ENV_COMPILER"`
+fi
+
+CIL_MODE=""
+if [ "$ENV_COMPILER" = "Msvc" ]; then CIL_MODE="--mode=MSVC"; fi
+
+if ! command -v "$COMPILER_PATH" > /dev/null 2>&1
+then
+   echo "<<Tigress>> Compiler, ${COMPILER_PATH}, could not be found or is not executable."
+   exit -1
+fi
+
+# Detect the compiler version when --Environment did not carry one.
+if [ -z "$ENV_COMPILER_VERSION" ]
+then
+   ENV_COMPILER_VERSION=`detect_compiler_version "$COMPILER_PATH"`
+   if [ -z "$ENV_COMPILER_VERSION" ]; then ENV_COMPILER_VERSION=1; fi
+fi
+
+# cilly receives the compiler as --gcc=...; it ignores the wrapper's own
+# --Compiler= option (which is fully consumed here).
+CIL_COMPILER="--gcc=${COMPILER_PATH}"
+
+##############################################################################################
+# 10. Determine MACHINE_SPEC_FILE (the target's machine-dependent type description):
+#     honour a user-supplied --jsonmachine=..., otherwise derive it from the environment.
+##############################################################################################
+
+MACHINE_SPEC_FILE=
+for x; do
+  if [[ $x = "--jsonmachine="* ]]; then MACHINE_SPEC_FILE="${x#--jsonmachine=}"; fi
+done
+
+if [ -z "$MACHINE_SPEC_FILE" ]
+then
+   # envToFilename_exe dumps its raw usage to stderr if a field is missing;
+   # capture its output and status quietly and report a clear error instead.
+   spec_base=`${BIN_DIR}/envToFilename_exe.exe --arch "$ENV_ARCH" --os "$ENV_OS" --compiler "$ENV_COMPILER" 2>/dev/null`
+   if [ $? -ne 0 ] || [ -z "$spec_base" ]
+   then
+      echo "<<Tigress>> Error: could not determine the machine-dependent types file for"
+      echo "<<Tigress>>   environment \"${ENV_ARCH}:${ENV_OS}:${ENV_COMPILER}\". Check that ARCH, OS and"
+      echo "<<Tigress>>   COMPILER are all set (COMPILER is one of Gcc, Clang, Msvc, Emcc)."
+      exit 1
+   fi
+   MACHINE_SPEC_FILE=${MACHDEPS_DIR}/${spec_base}
+fi
+if [ -n "$OS_IS_CYGWIN" ]
+then
+   MACHINE_SPEC_FILE=`cygpath --windows ${MACHINE_SPEC_FILE}`
+fi
+
+##############################################################################################
+# 11. Assemble the cilly argument list, report the resolved settings, and run cilly.
+#     The reported values are the ones we have arrived at (which are exactly what
+#     is passed to cilly). CC_OPTIONS is left unquoted so its several flags split
+#     apart; spaced paths stay quoted. The caller's own --Environment /
+#     --jsonmachine are dropped in favour of the canonical values computed above.
+##############################################################################################
+
+export OCAMLFIND_CONF=$BIN_DIR/findlib.conf
+
+bytecode=
+for x; do
+  if [ "$x" = "--bytecode" ] || [ "$x" = "--ocamldebug" ]; then bytecode=1; break; fi
+done
+
+CILLY_ARGS=( "$CIL_COMPILER" )
+if [ -n "$CIL_MODE" ]; then CILLY_ARGS+=( "$CIL_MODE" ); fi
+if [ -f "$MACHINE_SPEC_FILE" ]; then CILLY_ARGS+=( "--jsonmachine=${MACHINE_SPEC_FILE}" ); fi
+CILLY_ARGS+=( --dont-compile --doTigress $CC_OPTIONS "--Environment=${ENV_ARCH}:${ENV_OS}:${ENV_COMPILER}:${ENV_COMPILER_VERSION}" )
+for x; do
+  case "$x" in
+     --Environment=*|--jsonmachine=*) ;;   # replaced by the canonical values above
+     *)                               CILLY_ARGS+=( "$x" ) ;;
+  esac
+done
+
+if [ -z "$META_QUERY" ]
+then
+   echo "<<Tigress>> Settings:"
+   echo "<<Tigress>>     --Environment=${ENV_ARCH}:${ENV_OS}:${ENV_COMPILER}:${ENV_COMPILER_VERSION}"
+   echo "<<Tigress>>     --Compiler=${COMPILER_PATH}"
+   echo "<<Tigress>>     CC_OPTIONS=${CC_OPTIONS# }"
+   echo "<<Tigress>>     Types: ${MACHINE_SPEC_FILE}"
+   if [ ! -f "$MACHINE_SPEC_FILE" ]
+   then
+      echo "<<Tigress>>            WARNING: this file could not be found; cilly will use default"
+      echo "<<Tigress>>            machine-dependent type values, which might not be correct!"
+   fi
+fi
+
+if [ -n "$bytecode" ]
+then
+   echo "<<Tigress>> Executing:" "$BIN_DIR/cilly" "${CILLY_ARGS[@]}"
+fi
+
+$BIN_DIR/cilly "${CILLY_ARGS[@]}"
