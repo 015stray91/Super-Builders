@@ -120,14 +120,29 @@ jobs:
       - name: Install KernelSU-Next at pin
         run: |
           set -euo pipefail
-          git clone -q "${{ steps.pins.outputs.ksu_repo }}" /tmp/ksu-next
+          PIN="${{ steps.pins.outputs.ksu_pin }}"
+          REPO="${{ steps.pins.outputs.ksu_repo }}"
+          echo "repo: $REPO"
+          echo "pin:  $PIN"
+
+          # The pin is a tagged release commit; fetch just that object.
+          rm -rf /tmp/ksu-next
+          mkdir -p /tmp/ksu-next
           cd /tmp/ksu-next
-          git fetch -q origin "${{ steps.pins.outputs.ksu_pin }}"
-          git checkout -q "${{ steps.pins.outputs.ksu_pin }}"
-          rm -rf /tmp/kernel/KernelSU
+          git init -q .
+          git remote add origin "$REPO"
+          git fetch --depth 1 origin "$PIN" \
+            || git fetch --depth 1 origin refs/tags/v3.4.2
+          git checkout -q FETCH_HEAD
+          test -f kernel/Kbuild || { echo "not a KernelSU tree" >&2; exit 1; }
+          echo "KSU HEAD: $(git rev-parse --short HEAD)"
+
+          rm -rf /tmp/kernel/KernelSU /tmp/kernel/drivers/kernelsu
           cp -a /tmp/ksu-next /tmp/kernel/KernelSU
-          rm -rf /tmp/kernel/drivers/kernelsu
-          ln -sfn ../KernelSU/kernel /tmp/kernel/drivers/kernelsu
+          ln -s ../KernelSU/kernel /tmp/kernel/drivers/kernelsu
+          ls -la /tmp/kernel/drivers/kernelsu/ | head -5
+          test -f /tmp/kernel/drivers/kernelsu/Kbuild \
+            || { echo "drivers/kernelsu symlink is broken" >&2; exit 1; }
 
       - name: Apply SUSFS / ZeroMount / KSU patches
         run: |
