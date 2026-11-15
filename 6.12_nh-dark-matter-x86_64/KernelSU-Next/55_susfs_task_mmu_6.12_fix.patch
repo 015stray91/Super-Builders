@@ -1,0 +1,34 @@
+--- a/fs/proc/task_mmu.c
++++ b/fs/proc/task_mmu.c
+@@ -1202,10 +1202,9 @@
+ 			__show_smap(m, &mss, false);
+ 			seq_printf(m, "THPeligible:    %d\n", 0);
+ 			if (arch_pkeys_enabled())
+-					seq_printf(m, "ProtectionKey:  %8u\n", vma_pkey(vma));
+-			seq_puts(m, "VmFlags: mr mw me");
+-			seq_putc(m, '\n');
+-			goto show_pad;
++				seq_printf(m, "ProtectionKey:  %8u\n", vma_pkey(vma));
++			show_smap_vma_flags(m, vma);
++			return 0;
+ 		}
+ 	}
+ #endif
+@@ -2068,13 +2067,14 @@
+ 	svpfn = src / PM_ENTRY_BYTES;
+ 	end_vaddr = mm->task_size;
+ 
++#ifdef CONFIG_KSU_SUSFS_SUS_MAP
++	struct vm_area_struct *vma;
++#endif
++
+ 	/* watch out for wraparound */
+ 	start_vaddr = end_vaddr;
+ 	if (svpfn <= (ULONG_MAX >> PAGE_SHIFT)) {
+ 		unsigned long end;
+-#ifdef CONFIG_KSU_SUSFS_SUS_MAP
+-	struct vm_area_struct *vma;
+-#endif
+ 
+ 		ret = mmap_read_lock_killable(mm);
+ 		if (ret)
