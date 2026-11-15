@@ -49,7 +49,10 @@ jobs:
         run: |
           set -euo pipefail
           SB="$GITHUB_WORKSPACE/sb"
+          # export every pin so child processes (python) can read them
+          set -a
           . "$SB/6.12_nh-dark-matter-x86_64/pins.env"
+          set +a
           # sanity: the profile must agree with the pin manifest
           python3 - "$SB/device-profiles.json" <<'PY'
           import json, os, sys
