@@ -1,50 +1,18 @@
 diff --git a/kernel/Kbuild b/kernel/Kbuild
-index c32fa7cd..045e8673 100644
 --- a/kernel/Kbuild
 +++ b/kernel/Kbuild
-@@ -5,28 +5,14 @@ kernelsu-objs += feature/module_blacklist.o
- kernelsu-objs += feature/sulog.o
- kernelsu-objs += feature/sucompat.o
+@@ -7,7 +7,6 @@
  
--kernelsu-objs += hook/lsm_hook.o
+ kernelsu-objs += hook/lsm_hook.o
  kernelsu-objs += hook/setuid_hook.o
 -kernelsu-objs += hook/syscall_event_bridge.o
  kernelsu-objs += hook/syscall_hook_manager.o
--kernelsu-objs += hook/tp_marker.o
--ifeq ($(CONFIG_ARM64),y)
--kernelsu-objs += hook/arm64/patch_memory.o
--kernelsu-objs += hook/arm64/syscall_hook.o
--else ifeq ($(CONFIG_X86_64),y)
--kernelsu-objs += hook/x86_64/patch_memory.o
--kernelsu-objs += hook/x86_64/syscall_hook.o
--else ifeq ($(CONFIG_RISCV),y)
--kernelsu-objs += hook/riscv64/patch_memory.o
--kernelsu-objs += hook/riscv64/syscall_hook.o
--endif
- kernelsu-objs += extras.o
- 
- kernelsu-objs += infra/file_wrapper.o
- kernelsu-objs += infra/event_queue.o
- kernelsu-objs += infra/seccomp_cache.o
- kernelsu-objs += infra/su_mount_ns.o
--kernelsu-objs += infra/symbol_resolver.o
- 
- ifneq ($(CONFIG_KSU_DISABLE_MANAGER),y)
- kernelsu-objs += manager/apk_sign.o
-@@ -162,4 +148,24 @@ ccflags-y += -DKSU_NEW_DCACHE_FLUSH=$(KSU_NEW_DCACHE_FLUSH)
+ kernelsu-objs += hook/tp_marker.o
+ ifeq ($(CONFIG_ARM64),y)
+@@ -162,4 +161,14 @@
  ccflags-y += -Wno-strict-prototypes -Wno-int-conversion -Wno-gcc-compat -Wno-missing-prototypes -Wno-missing-declarations
  ccflags-y += -Wno-declaration-after-statement -Wno-unused-function -Wno-unused-variable
  
-+## For susfs stuff ##
-+ifeq ($(shell test -e $(srctree)/fs/susfs.c; echo $$?),0)
-+$(eval SUSFS_VERSION=$(shell cat $(srctree)/include/linux/susfs.h | grep -E '^#define SUSFS_VERSION' | cut -d' ' -f3 | sed 's/"//g'))
-+$(info )
-+$(info -- SUSFS_VERSION: $(SUSFS_VERSION))
-+else
-+$(info -- You have not integrated susfs in your kernel yet.)
-+$(info -- Read: https://gitlab.com/simonpunk/susfs4ksu)
-+endif
-+
 +## For susfs stuff ##
 +ifeq ($(shell test -e $(srctree)/fs/susfs.c; echo $$?),0)
 +$(eval SUSFS_VERSION=$(shell cat $(srctree)/include/linux/susfs.h | grep -E '^#define SUSFS_VERSION' | cut -d' ' -f3 | sed 's/"//g'))

@@ -1,0 +1,116 @@
+diff --git a/kernel/Kbuild b/kernel/Kbuild
+--- a/kernel/Kbuild
++++ b/kernel/Kbuild
+@@ -7,8 +7,16 @@
+ 
+ kernelsu-objs += hook/lsm_hook.o
+ kernelsu-objs += hook/setuid_hook.o
++# KernelSU-Next's syscall-dispatcher hooks and SUSFS are two alternative
++# intercept strategies.  With SUSFS on, the fs-level hooks installed by the
++# SUSFS patches (fs/stat.c, fs/open.c, fs/exec.c) call the classic-signature
++# shims that sucompat.c provides in its CONFIG_KSU_SUSFS branch, so this
++# machinery must not be built: it would also pull in duplicate definitions.
++ifndef CONFIG_KSU_SUSFS
++kernelsu-objs += hook/syscall_event_bridge.o
+ kernelsu-objs += hook/syscall_hook_manager.o
+ kernelsu-objs += hook/tp_marker.o
++endif
+ ifeq ($(CONFIG_ARM64),y)
+ kernelsu-objs += hook/arm64/patch_memory.o
+ kernelsu-objs += hook/arm64/syscall_hook.o
+diff --git a/kernel/core/init.c b/kernel/core/init.c
+--- a/kernel/core/init.c
++++ b/kernel/core/init.c
+@@ -15,7 +15,12 @@
+ #include "klog.h" // IWYU pragma: keep
+ #include "manager/manager_observer.h"
+ #include "manager/throne_tracker.h"
++#ifndef CONFIG_KSU_SUSFS
+ #include "hook/syscall_hook_manager.h"
++#else
++#include "hook/setuid_hook.h"
++#include "feature/sucompat.h"
++#endif
+ #include "hook/lsm_hook.h"
+ #include "runtime/ksud.h"
+ #include "runtime/ksud_boot.h"
+@@ -173,7 +178,12 @@
+ 		ksu_allowlist_init();
+ 		ksu_load_allow_list();
+ 
++#ifndef CONFIG_KSU_SUSFS
+ 		ksu_syscall_hook_manager_init();
++#else
++		ksu_setuid_hook_init();
++		ksu_sucompat_init();
++#endif
+ 
+ 		ksu_throne_tracker_init();
+ 
+@@ -195,7 +205,12 @@
+ 		}
+ 
+ 	} else {
++#ifndef CONFIG_KSU_SUSFS
+ 		ksu_syscall_hook_manager_init();
++#else
++		ksu_setuid_hook_init();
++		ksu_sucompat_init();
++#endif
+ 
+ 		ksu_allowlist_init();
+ 
+@@ -221,7 +236,11 @@
+ void __exit kernelsu_exit(void)
+ {
+ 	// Phase 1: Stop all hooks first to prevent new callbacks
++#ifndef CONFIG_KSU_SUSFS
+ 	ksu_syscall_hook_manager_exit();
++#else
++	ksu_setuid_hook_exit();
++#endif
+ 
+ 	ksu_supercalls_exit();
+ 
+diff --git a/kernel/runtime/ksud_integration.c b/kernel/runtime/ksud_integration.c
+--- a/kernel/runtime/ksud_integration.c
++++ b/kernel/runtime/ksud_integration.c
+@@ -28,7 +28,15 @@
+ #include "policy/feature.h"
+ #include "selinux/selinux.h"
+ #include "hook/syscall_hook.h"
++#ifndef CONFIG_KSU_SUSFS
+ #include "hook/syscall_event_bridge.h"
++#endif
++
++#ifdef CONFIG_KSU_SUSFS
++bool ksu_init_rc_hook __read_mostly = true;
++bool ksu_input_hook __read_mostly = false;
++bool ksu_execveat_hook __read_mostly = true;
++#endif
+ 
+ // clang-format off
+ static const char KERNEL_SU_RC[] =
+@@ -181,7 +189,12 @@
+             pr_info("exec zygote, /data prepared, second_stage: %d\n", init_second_stage_executed);
+             on_post_fs_data();
+             first_zygote = false;
++#ifndef CONFIG_KSU_SUSFS
+             ksu_stop_ksud_execve_hook();
++#else
++            ksu_execveat_hook = false;
++            pr_info("stop execveat_hook\n");
++#endif
+         }
+     }
+ 
+@@ -481,9 +494,6 @@
+     fput(file);
+ }
+ #else
+-bool ksu_init_rc_hook __read_mostly = true;
+-bool ksu_input_hook __read_mostly = false;
+-bool ksu_execveat_hook __read_mostly = true;
+ 
+ __attribute__((cold)) void ksu_handle_sys_read(unsigned int fd)
+ {
