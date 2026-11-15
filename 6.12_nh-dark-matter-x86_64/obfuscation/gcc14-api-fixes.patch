@@ -1,0 +1,101 @@
+diff --git a/BCF.cpp b/BCF.cpp
+index 1db4e41..6575848 100644
+--- a/BCF.cpp
++++ b/BCF.cpp
+@@ -18,6 +18,13 @@
+ #include "BCF.h"
+ 
+ #include <basic-block.h>
++#include <tree.h>
++#include <stringpool.h>
++#include <gimplify.h>
++#include <tree-ssa-alias.h>
++#include <value-range.h>
++#include <tree-ssanames.h>
++#include <tree-vrp.h>
+ #include <function.h>
+ #include <tree.h>
+ #include <tree-cfg.h>
+@@ -98,41 +105,44 @@ unsigned int BCFPass::execute(function* f) {
+     // Create a NOP so the builder has an insertion point.
+     gsi_insert_after(&gsi, gimple_build_nop(), GSI_NEW_STMT);
+     // Flatten the sub-expressions and store the GIMPLE value.
+-    tree opaque_cond = gimplify_build2(&gsi, TRUTH_OR_EXPR, boolean_type_node,
+-                                       copy_node(first_cond),
+-                                       copy_node(second_cond4));
+-    // Insert if (y < 10 || x * (x + 1) & 1 == 0)
+-    gsi_insert_after(&gsi, gimple_build_cond(NE_EXPR, opaque_cond,
+-                                             boolean_false_node, NULL_TREE,
+-                                             NULL_TREE), GSI_NEW_STMT);
+-
+-    // Create a junk block by splitting the edge between the conditional block
+-    // and the real block.
++    // Gimplify each side first so the operands are plain GIMPLE values, then
++    // combine them. Gimplifying an unbalanced build2() tree directly makes
++    // gimplify_expr() recurse into unlowered nodes and crash.
++    gimple_seq stmts = NULL;
++    tree c1 = first_cond, c2 = second_cond4;
++    if (gimplify_expr(&c1, &stmts, NULL, is_gimple_val, fb_rvalue) == GS_ERROR ||
++        gimplify_expr(&c2, &stmts, NULL, is_gimple_val, fb_rvalue) == GS_ERROR)
++      continue;
++    // Both operands are plain GIMPLE values now, so combining and gimplifying
++    // the (shallow) result is safe.
++    tree opaque_expr = build2(TRUTH_OR_EXPR, boolean_type_node, c1, c2);
++    if (gimplify_expr(&opaque_expr, &stmts, NULL, is_gimple_val,
++                      fb_rvalue) == GS_ERROR || opaque_expr == NULL_TREE)
++      continue;
++    gsi_insert_seq_before(&gsi, stmts, GSI_SAME_STMT);
++    // if (y < 10 || x * (x + 1) & 1 == 0) -> real block, else -> junk block.
++    gsi_insert_before(&gsi, gimple_build_cond(NE_EXPR, opaque_expr,
++                                              boolean_false_node, NULL_TREE,
++                                              NULL_TREE), GSI_SAME_STMT);
++
++    // Split the edge so we can hang a dead-looking junk block off the false
++    // arm. The predicate is opaque-true, so the junk arm never actually runs.
+     basic_block junk_block = split_edge(EDGE_SUCC(conditional_block, 0));
+     gimple_stmt_iterator junk_gsi = gsi_last_bb(junk_block);
+     gsi_insert_after(&junk_gsi, gimple_build_nop(), GSI_NEW_STMT);
++    gsi_insert_after(&junk_gsi, gimple_build_nop(), GSI_NEW_STMT);
+ 
+-    // Mark the default fallthrough of the conditional block pointing to the junk
+-    // block the false value.
++    // Default fallthrough keeps the false arm pointing at the junk block.
+     edge enter_e = EDGE_SUCC(conditional_block, 0);
+     enter_e->flags &= ~EDGE_FALLTHRU;
+     enter_e->flags |= EDGE_FALSE_VALUE;
+ 
+-    // Add a true value to the conditional block that jumps to the real basic
+-    // block.
+-    edge new_e2 = make_edge(conditional_block, single_succ(junk_block),
+-                            EDGE_TRUE_VALUE);
+-    (void) new_e2;
+-
+-    // Now make the junk block loop back to the conditional block.
+-    remove_bb_from_loops(junk_block);
+-    add_bb_to_loop(junk_block, conditional_block->loop_father);
+-    redirect_edge_succ(single_succ_edge(junk_block), conditional_block);
++    // True arm goes straight to the real code.
++    make_edge(conditional_block, junk_block->next_bb ? junk_block->next_bb
++                                                     : EXIT_BLOCK_PTR_FOR_FN(f),
++              EDGE_TRUE_VALUE);
+   }
+ 
+-  // Fix-up since we've added loops.
+-  loops_state_set(LOOPS_NEED_FIXUP);
+-
+   // We've moved the CFG around a lot, so throw away the computed dominators.
+   free_dominance_info(f, CDI_DOMINATORS);
+   free_dominance_info(f, CDI_POST_DOMINATORS);
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 70b7a59..be1fdd0 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.1)
+ set(CMAKE_CXX_STANDARD 17)
+ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Werror -Wno-unused-variable -fno-rtti")
+ 
+-execute_process(COMMAND gcc -print-file-name=plugin OUTPUT_VARIABLE GCC_PLUGIN_DIR OUTPUT_STRIP_TRAILING_WHITESPACE)
++execute_process(COMMAND ${CMAKE_C_COMPILER} -print-file-name=plugin OUTPUT_VARIABLE GCC_PLUGIN_DIR OUTPUT_STRIP_TRAILING_WHITESPACE)
+ set(GCC_INCLUDE_DIR ${GCC_PLUGIN_DIR}/include)
+ include_directories(${GCC_INCLUDE_DIR})
+ 

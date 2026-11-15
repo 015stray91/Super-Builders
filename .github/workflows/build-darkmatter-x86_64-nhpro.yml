@@ -1,0 +1,254 @@
+name: Build DarkMatter x86_64 - NetHunter Pro (KSU-Next + SUSFS + ZeroMount)
+
+# Builds a Kali NetHunter Pro amd64 kernel for the ASUS Vivobook Go 14/15
+# (E1404FA, AMD Mendocino APU) from the pinned kernel-zenith 6.12_KSU tree,
+# with KernelSU-Next, SUSFS and ZeroMount enabled together.
+#
+# All pins live in 6.12_nh-dark-matter-x86_64/pins.env; the device profile is
+# the `darkmatter-vivobook` entry in device-profiles.json. Edit those, not this
+# file, to move a pin.
+#
+# Artifact: bzImage + System.map + .config + modules, plus the NetHunter Pro
+# initrd.img / ramdisk.img, ready to assemble a boot image.
+
+on:
+  workflow_dispatch:
+    inputs:
+      obfuscate:
+        description: 'Apply goat GIMPLE substitution pass'
+        type: boolean
+        default: false
+      pack:
+        description: 'Stage a complete boot folder in the artifact'
+        type: boolean
+        default: true
+  push:
+    branches: [015stray91]
+    paths:
+      - '.github/workflows/build-darkmatter-x86_64-nhpro.yml'
+      - '6.12_nh-dark-matter-x86_64/**'
+      - 'device-profiles.json'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: DarkMatter NH-Pro x86_64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout Super-Builders
+        uses: actions/checkout@v4
+        with:
+          path: sb
+
+      - name: Load pins
+        id: pins
+        run: |
+          set -euo pipefail
+          SB="$GITHUB_WORKSPACE/sb"
+          . "$SB/6.12_nh-dark-matter-x86_64/pins.env"
+          # sanity: the profile must agree with the pin manifest
+          python3 - "$SB/device-profiles.json" <<'PY'
+          import json, os, sys
+          prof = json.load(open(sys.argv[1]))['devices'][os.environ.get('PROFILE_ID')]
+          assert prof['kernel_pin']   == os.environ['KERNEL_PIN'],   'kernel pin drift'
+          assert prof['kernelsu_pin'] == os.environ['KSU_PIN'],      'ksu pin drift'
+          assert prof['config_fragment'] == os.environ['CONFIG_FRAGMENT'], 'fragment drift'
+          print('profile <-> pins.env consistent')
+          PY
+          {
+            echo "kernel_repo=$KERNEL_REPO"
+            echo "kernel_branch=$KERNEL_BRANCH"
+            echo "kernel_pin=$KERNEL_PIN"
+            echo "ksu_repo=$KSU_REPO"
+            echo "ksu_pin=$KSU_PIN"
+            echo "nh_ref=$NH_REF"
+            echo "nh_dir=$NH_DIR"
+            echo "nh_files=$NH_FILES"
+            echo "arch=$ARCH"
+            echo "config_fragment=$CONFIG_FRAGMENT"
+            echo "config_base=$CONFIG_BASE"
+            echo "patch_kernel_side=$PATCH_KERNEL_SIDE"
+            echo "patch_ksu_side=$PATCH_KSU_SIDE"
+            echo "goat_repo=$GOAT_REPO"
+            echo "goat_gcc=$GOAT_GCC"
+            echo "goat_passes=$GOAT_PASSES"
+            echo "goat_seed=$GOAT_SEED"
+            echo "required_config=$REQUIRED_CONFIG"
+            echo "forbidden_config=$FORBIDDEN_CONFIG"
+            echo "board_name=$BOARD_NAME"
+            echo "board_model=$BOARD_MODEL"
+            echo "board_apu=$BOARD_APU"
+          } >> "$GITHUB_OUTPUT"
+          cat "$GITHUB_OUTPUT"
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential bc bison flex libssl-dev libelf-dev \
+            libncurses-dev cpio xz-utils zstd kmod rsync \
+            gcc-12 gcc-12-plugin-dev cmake ninja-build perl
+
+      - name: Cache kernel source
+        uses: actions/cache@v4
+        with:
+          path: /tmp/kernel
+          key: kz-${{ steps.pins.outputs.kernel_pin }}-${{ steps.pins.outputs.kernel_branch }}
+
+      - name: Fetch kernel at pin
+        run: |
+          set -euo pipefail
+          if [ ! -d /tmp/kernel/.git ]; then
+            git clone --filter=blob:none --no-checkout \
+              "${{ steps.pins.outputs.kernel_repo }}" /tmp/kernel
+          fi
+          cd /tmp/kernel
+          git fetch -q --depth 1 origin "${{ steps.pins.outputs.kernel_branch }}"
+          git checkout -q "${{ steps.pins.outputs.kernel_pin }}"
+          test -f arch/x86/entry/common.c
+          # the pin must carry the indirect-syscall hardening KernelSU requires
+          grep -q X86_FEATURE_INDIRECT_SAFE arch/x86/include/asm/cpufeatures.h \
+            || { echo "kernel pin lacks indirect-syscall hardening" >&2; exit 1; }
+
+      - name: Install KernelSU-Next at pin
+        run: |
+          set -euo pipefail
+          git clone -q "${{ steps.pins.outputs.ksu_repo }}" /tmp/ksu-next
+          cd /tmp/ksu-next
+          git fetch -q origin "${{ steps.pins.outputs.ksu_pin }}"
+          git checkout -q "${{ steps.pins.outputs.ksu_pin }}"
+          rm -rf /tmp/kernel/KernelSU
+          cp -a /tmp/ksu-next /tmp/kernel/KernelSU
+          rm -rf /tmp/kernel/drivers/kernelsu
+          ln -sfn ../KernelSU/kernel /tmp/kernel/drivers/kernelsu
+
+      - name: Apply SUSFS / ZeroMount / KSU patches
+        run: |
+          set -euo pipefail
+          P="$GITHUB_WORKSPACE/sb/6.12_nh-dark-matter-x86_64"
+
+          apply() {  # apply <dir> <patch>
+            echo "::group::$(basename "$2")"
+            ( cd "$1" && patch -p1 --forward -F3 --no-backup-if-mismatch <"$2" )
+            echo "::endgroup::"
+          }
+
+          for f in ${{ steps.pins.outputs.patch_kernel_side }}; do
+            apply /tmp/kernel "$P/$f"
+          done
+
+          # KernelSU-side patches use kernel/... paths
+          for f in ${{ steps.pins.outputs.patch_ksu_side }}; do
+            apply /tmp/kernel/KernelSU "$P/$f"
+          done
+
+      - name: Configure DarkMatter + NetHunter Pro + Vivobook Go
+        run: |
+          set -euo pipefail
+          cd /tmp/kernel
+          mkdir -p /tmp/out
+          make O=/tmp/out ARCH="${{ steps.pins.outputs.arch }}" \
+            "${{ steps.pins.outputs.config_base }}"
+          ./scripts/kconfig/merge_config.sh -m -O /tmp/out \
+            /tmp/out/.config \
+            "$GITHUB_WORKSPACE/sb/${{ steps.pins.outputs.config_fragment }}"
+          make O=/tmp/out ARCH="${{ steps.pins.outputs.arch }}" olddefconfig
+
+          for o in ${{ steps.pins.outputs.required_config }}; do
+            grep -q "^${o}=y" /tmp/out/.config || { echo "$o missing" >&2; exit 1; }
+          done
+          for o in ${{ steps.pins.outputs.forbidden_config }}; do
+            if grep -q "^${o}=y" /tmp/out/.config; then
+              echo "$o must stay off (tree already has the hardening)" >&2; exit 1
+            fi
+          done
+          gzip -9 -c /tmp/out/.config > /tmp/out/config.gz
+
+      - name: Build goat (GCC GIMPLE) plugin
+        if: ${{ inputs.obfuscate }}
+        run: |
+          set -euo pipefail
+          git clone -q --depth 1 "${{ steps.pins.outputs.goat_repo }}" /tmp/goat
+          cd /tmp/goat
+          patch -p1 \
+            < "$GITHUB_WORKSPACE/sb/6.12_nh-dark-matter-x86_64/obfuscation/gcc14-api-fixes.patch"
+          mkdir -p build && cd build
+          CC="${{ steps.pins.outputs.goat_gcc }}" cmake .. -DCMAKE_BUILD_TYPE=Release
+          make -j"$(nproc)"
+          test -f hellscape.so
+
+      - name: Build kernel
+        run: |
+          set -euo pipefail
+          cd /tmp/kernel
+          KCFLAGS_EXTRA=""
+          if [ "${{ inputs.obfuscate }}" = "true" ]; then
+            # Only the substitution pass survives kernel code; FLA and BCF
+            # crash inside GCC on computed gotos / irreducible CFGs.
+            FLAGS="-fplugin=/tmp/goat/build/hellscape.so \
+              -fplugin-arg-hellscape-seed=${{ steps.pins.outputs.goat_seed }}"
+            for p in ${{ steps.pins.outputs.goat_passes }}; do
+              FLAGS="$FLAGS -fplugin-arg-hellscape-$p"
+            done
+            KCFLAGS_EXTRA="$FLAGS"
+          fi
+          make O=/tmp/out ARCH="${{ steps.pins.outputs.arch }}" -j"$(nproc)" \
+            ${KCFLAGS_EXTRA:+KCFLAGS="$KCFLAGS_EXTRA"} \
+            bzImage modules
+          ls -la /tmp/out/arch/x86/boot/bzImage
+
+      - name: Fetch NetHunter Pro amd64 payload
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/nh
+          for f in ${{ steps.pins.outputs.nh_files }}; do
+            curl -fsSL -o "/tmp/nh/$f" \
+              "https://raw.githubusercontent.com/015stray91/kernel-zenith/${{ steps.pins.outputs.nh_ref }}/${{ steps.pins.outputs.nh_dir }}/$f"
+          done
+          file /tmp/nh/initrd.img /tmp/nh/ramdisk.img
+          ls -lh /tmp/nh
+
+      - name: Stage artefacts
+        if: ${{ inputs.pack }}
+        run: |
+          set -euo pipefail
+          B=/tmp/boot; rm -rf "$B"; mkdir -p "$B/modules"
+          cp /tmp/out/arch/x86/boot/bzImage "$B/vmlinuz"
+          cp /tmp/out/System.map              "$B/System.map"
+          cp /tmp/out/.config                 "$B/config"
+          cp /tmp/nh/initrd.img               "$B/initrd.img"
+          cp /tmp/nh/ramdisk.img              "$B/ramdisk.img"
+          cp /tmp/nh/config-pro               "$B/config-pro.ref"
+          make -C /tmp/kernel O=/tmp/out ARCH="${{ steps.pins.outputs.arch }}" \
+            INSTALL_MOD_PATH="$B/modules" modules_install >/dev/null
+
+          {
+            echo "board:      ${{ steps.pins.outputs.board_name }} (${{ steps.pins.outputs.board_model }})"
+            echo "apu:        ${{ steps.pins.outputs.board_apu }}"
+            echo "kernel:     ${{ steps.pins.outputs.kernel_repo }}"
+            echo "branch:     ${{ steps.pins.outputs.kernel_branch }}"
+            echo "kernel_pin: ${{ steps.pins.outputs.kernel_pin }}"
+            echo "ksu_pin:    ${{ steps.pins.outputs.ksu_pin }}"
+            echo "nethunter:  ${{ steps.pins.outputs.nh_ref }}"
+            echo "susfs:      yes"
+            echo "zeromount:  yes"
+            echo "obfuscate:  ${{ inputs.obfuscate }}"
+            echo "built:      $(date -u +%FT%TZ)"
+          } > "$B/BUILD-INFO.txt"
+          ( cd "$B" && find . -maxdepth 2 -type f -printf '%10s  %p\n' | sort -k2 )
+
+      - name: Upload artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: darkmatter-nhpro-x86_64
+          path: |
+            /tmp/boot
+            /tmp/out/arch/x86/boot/bzImage
+            /tmp/out/System.map
+            /tmp/out/config.gz
+          if-no-files-found: error
+          retention-days: 14

@@ -1,9 +1,10 @@
-diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/Kconfig work/fs/Kconfig
---- work-50-base/fs/Kconfig	2026-03-01 05:17:51.396511222 +0100
-+++ work/fs/Kconfig	2026-03-01 06:09:40.950669509 +0100
-@@ -432,4 +432,11 @@
- config IO_WQ
- 	bool
+diff --git a/fs/Kconfig b/fs/Kconfig
+index 5c78f3afd..d6c44ef4c 100644
+--- a/fs/Kconfig
++++ b/fs/Kconfig
+@@ -461,4 +461,11 @@ config KSU_SUSFS_HARDENED
+ 	  Fixes upstream SUSFS concurrency and error-handling bugs.
+ 	  Disable to match exact upstream behavior.
  
 +config ZEROMOUNT
 +	bool "ZeroMount Path Redirection Subsystem"
@@ -13,10 +14,11 @@ diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/Kconfig work/fs/Kconfi
 +	  without mounting filesystems. Useful for systemless modifications.
 +
  endmenu
-diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/Makefile work/fs/Makefile
---- work-50-base/fs/Makefile	2026-03-01 05:27:32.054784361 +0100
-+++ work/fs/Makefile	2026-03-01 06:13:04.508054204 +0100
-@@ -23,6 +23,7 @@
+diff --git a/fs/Makefile b/fs/Makefile
+index 4fb8c0db0..0c1e76c72 100644
+--- a/fs/Makefile
++++ b/fs/Makefile
+@@ -18,6 +18,7 @@ obj-y :=	open.o read_write.o file_table.o super.o \
  		kernel_read_file.o mnt_idmapping.o remap_range.o pidfs.o
  
  obj-$(CONFIG_KSU_SUSFS) += susfs.o
@@ -24,9 +26,10 @@ diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/Makefile work/fs/Makef
  
  obj-$(CONFIG_BUFFER_HEAD)	+= buffer.o mpage.o
  obj-$(CONFIG_PROC_FS)		+= proc_namespace.o
-diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/d_path.c work/fs/d_path.c
---- work-50-base/fs/d_path.c	2026-03-01 05:17:52.488486670 +0100
-+++ work/fs/d_path.c	2026-03-01 06:09:40.951075001 +0100
+diff --git a/fs/d_path.c b/fs/d_path.c
+index 5f4da5c8d..c3d8d0c97 100644
+--- a/fs/d_path.c
++++ b/fs/d_path.c
 @@ -8,6 +8,10 @@
  #include <linux/prefetch.h>
  #include "mount.h"
@@ -38,10 +41,10 @@ diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/d_path.c work/fs/d_pat
  
  struct prepend_buffer {
  	char *buf;
-@@ -267,6 +271,20 @@
+@@ -267,6 +271,20 @@ char *d_path(const struct path *path, char *buf, int buflen)
  	DECLARE_BUFFER(b, buf, buflen);
  	struct path root;
-
+ 
 +#ifdef CONFIG_ZEROMOUNT
 +	if (path->dentry && d_backing_inode(path->dentry)) {
 +		char *v_path = zeromount_get_static_vpath(d_backing_inode(path->dentry));
@@ -59,12 +62,14 @@ diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/d_path.c work/fs/d_pat
  	/*
  	 * We have various synthetic filesystems that never get mounted.  On
  	 * these filesystems dentries are never used for lookup purposes, and
-diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/namei.c work/fs/namei.c
---- work-50-base/fs/namei.c	2026-03-01 05:42:04.393035305 +0100
-+++ work/fs/namei.c	2026-03-01 06:09:41.091390946 +0100
-@@ -48,6 +48,10 @@
+diff --git a/fs/namei.c b/fs/namei.c
+index 485a301c7..d7df8ebdc 100644
+--- a/fs/namei.c
++++ b/fs/namei.c
+@@ -50,6 +50,10 @@
+ #include "internal.h"
  #include "mount.h"
-
+ 
 +#ifdef CONFIG_ZEROMOUNT
 +#include <linux/zeromount.h>
 +#endif
@@ -72,8 +77,7 @@ diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/namei.c work/fs/namei.
  #ifdef CONFIG_KSU_SUSFS_SUS_PATH
  extern bool susfs_is_inode_sus_path(struct mnt_idmap* idmap, struct inode *inode);
  extern const struct qstr susfs_fake_qstr_name;
- #endif
-@@ -219,6 +223,13 @@
+@@ -222,6 +226,13 @@ getname_flags(const char __user *filename, int flags)
  	result->uptr = filename;
  	result->aname = NULL;
  	audit_getname(result);
@@ -87,7 +91,7 @@ diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/namei.c work/fs/namei.
  	return result;
  }
  
-@@ -419,6 +430,18 @@
+@@ -422,6 +433,18 @@ int generic_permission(struct mnt_idmap *idmap, struct inode *inode,
  {
  	int ret;
  
@@ -106,7 +110,7 @@ diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/namei.c work/fs/namei.
  	/*
  	 * Do the basic permission checks.
  	 */
-@@ -523,6 +546,18 @@
+@@ -526,6 +549,18 @@ int inode_permission(struct mnt_idmap *idmap,
  {
  	int retval;
  
@@ -125,12 +129,13 @@ diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/namei.c work/fs/namei.
  	retval = sb_permission(inode->i_sb, inode, mask);
  	if (retval)
  		return retval;
-diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/proc/base.c work/fs/proc/base.c
---- work-50-base/fs/proc/base.c	2026-03-01 05:27:32.058615314 +0100
-+++ work/fs/proc/base.c	2026-03-01 06:09:41.356479099 +0100
-@@ -107,6 +107,9 @@
+diff --git a/fs/proc/base.c b/fs/proc/base.c
+index 033c5ab6e..b63b912a5 100644
+--- a/fs/proc/base.c
++++ b/fs/proc/base.c
+@@ -105,6 +105,9 @@
+ #include <uapi/linux/lsm.h>
  #include <trace/events/oom.h>
- #include <trace/hooks/sched.h>
  #include "internal.h"
 +#ifdef CONFIG_ZEROMOUNT
 +#include <linux/zeromount.h>
@@ -138,7 +143,7 @@ diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/proc/base.c work/fs/pr
  #include "fd.h"
  
  #include "../../lib/kstrtox.h"
-@@ -1862,6 +1865,26 @@
+@@ -1850,6 +1853,26 @@ static int do_proc_readlink(const struct path *path, char __user *buffer, int bu
  	if (!tmp)
  		return -ENOMEM;
  
@@ -164,21 +169,22 @@ diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/proc/base.c work/fs/pr
 +
  	pathname = d_path(path, tmp, PATH_MAX);
  	len = PTR_ERR(pathname);
- 
-diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/proc/task_mmu.c work/fs/proc/task_mmu.c
---- work-50-base/fs/proc/task_mmu.c	2026-03-01 05:27:32.059714569 +0100
-+++ work/fs/proc/task_mmu.c	2026-03-01 06:09:41.357867226 +0100
+ 	if (IS_ERR(pathname))
+diff --git a/fs/proc/task_mmu.c b/fs/proc/task_mmu.c
+index a9ace4c83..dfba03f90 100644
+--- a/fs/proc/task_mmu.c
++++ b/fs/proc/task_mmu.c
 @@ -20,6 +20,9 @@
- #include <linux/mmu_notifier.h>
- #include <linux/page_idle.h>
- #include <linux/page_size_compat.h>
-+#ifdef CONFIG_ZEROMOUNT
-+#include <linux/zeromount.h>
-+#endif
  #include <linux/shmem_fs.h>
  #include <linux/uaccess.h>
  #include <linux/pkeys.h>
-@@ -504,6 +507,9 @@
++#ifdef CONFIG_ZEROMOUNT
++#include <linux/zeromount.h>
++#endif
+ #include <linux/minmax.h>
+ #include <linux/overflow.h>
+ #include <linux/buildid.h>
+@@ -375,6 +378,9 @@ show_map_vma(struct seq_file *m, struct vm_area_struct *vma)
  #endif
  		dev = inode->i_sb->s_dev;
  		ino = inode->i_ino;
@@ -188,9 +194,10 @@ diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/proc/task_mmu.c work/f
  #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
  bypass_orig_flow:
  #endif
-diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/readdir.c work/fs/readdir.c
---- work-50-base/fs/readdir.c	2026-03-01 05:27:32.061062044 +0100
-+++ work/fs/readdir.c	2026-03-01 06:12:59.504163195 +0100
+diff --git a/fs/readdir.c b/fs/readdir.c
+index 77213f638..8bdbec963 100644
+--- a/fs/readdir.c
++++ b/fs/readdir.c
 @@ -21,6 +21,9 @@
  #include <linux/unistd.h>
  #include <linux/compat.h>
@@ -201,7 +208,7 @@ diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/readdir.c work/fs/read
  
  #ifdef CONFIG_KSU_SUSFS_SUS_PATH
  #include <linux/susfs_def.h>
-@@ -364,11 +367,21 @@
+@@ -364,11 +367,21 @@ SYSCALL_DEFINE3(getdents, unsigned int, fd,
  		.current_dir = dirent
  	};
  	int error;
@@ -223,7 +230,7 @@ diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/readdir.c work/fs/read
  #ifdef CONFIG_KSU_SUSFS_SUS_PATH
  	buf.sb = fd_file(f)->f_inode->i_sb;
  	buf.idmap = mnt_idmap(fd_file(f)->f_path.mnt);
-@@ -377,6 +390,16 @@
+@@ -377,6 +390,16 @@ SYSCALL_DEFINE3(getdents, unsigned int, fd,
  	error = iterate_dir(fd_file(f), &buf.ctx);
  	if (error >= 0)
  		error = buf.error;
@@ -240,7 +247,7 @@ diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/readdir.c work/fs/read
  	if (buf.prev_reclen) {
  		struct linux_dirent __user * lastdirent;
  		lastdirent = (void __user *)buf.current_dir - buf.prev_reclen;
-@@ -386,6 +409,9 @@
+@@ -386,6 +409,9 @@ SYSCALL_DEFINE3(getdents, unsigned int, fd,
  		else
  			error = count - buf.count;
  	}
@@ -250,7 +257,7 @@ diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/readdir.c work/fs/read
  	fdput_pos(f);
  	return error;
  }
-@@ -472,11 +498,21 @@
+@@ -472,11 +498,21 @@ SYSCALL_DEFINE3(getdents64, unsigned int, fd,
  		.current_dir = dirent
  	};
  	int error;
@@ -272,7 +279,7 @@ diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/readdir.c work/fs/read
  #ifdef CONFIG_KSU_SUSFS_SUS_PATH
  	buf.sb = fd_file(f)->f_inode->i_sb;
  	buf.idmap = mnt_idmap(fd_file(f)->f_path.mnt);
-@@ -485,6 +521,16 @@
+@@ -485,6 +521,16 @@ SYSCALL_DEFINE3(getdents64, unsigned int, fd,
  	error = iterate_dir(fd_file(f), &buf.ctx);
  	if (error >= 0)
  		error = buf.error;
@@ -289,7 +296,7 @@ diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/readdir.c work/fs/read
  	if (buf.prev_reclen) {
  		struct linux_dirent64 __user * lastdirent;
  		typeof(lastdirent->d_off) d_off = buf.ctx.pos;
-@@ -495,6 +541,9 @@
+@@ -495,6 +541,9 @@ SYSCALL_DEFINE3(getdents64, unsigned int, fd,
  		else
  			error = count - buf.count;
  	}
@@ -299,7 +306,7 @@ diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/readdir.c work/fs/read
  	fdput_pos(f);
  	return error;
  }
-@@ -688,11 +737,21 @@
+@@ -688,11 +737,21 @@ COMPAT_SYSCALL_DEFINE3(getdents, unsigned int, fd,
  		.count = count
  	};
  	int error;
@@ -321,7 +328,7 @@ diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/readdir.c work/fs/read
  #ifdef CONFIG_KSU_SUSFS_SUS_PATH
  	buf.sb = fd_file(f)->f_inode->i_sb;
  	buf.idmap = mnt_idmap(fd_file(f)->f_path.mnt);
-@@ -701,6 +760,16 @@
+@@ -701,6 +760,16 @@ COMPAT_SYSCALL_DEFINE3(getdents, unsigned int, fd,
  	error = iterate_dir(fd_file(f), &buf.ctx);
  	if (error >= 0)
  		error = buf.error;
@@ -338,7 +345,7 @@ diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/readdir.c work/fs/read
  	if (buf.prev_reclen) {
  		struct compat_linux_dirent __user * lastdirent;
  		lastdirent = (void __user *)buf.current_dir - buf.prev_reclen;
-@@ -710,6 +779,9 @@
+@@ -710,6 +779,9 @@ COMPAT_SYSCALL_DEFINE3(getdents, unsigned int, fd,
  		else
  			error = count - buf.count;
  	}
@@ -348,10 +355,11 @@ diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/readdir.c work/fs/read
  	fdput_pos(f);
  	return error;
  }
-diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/stat.c work/fs/stat.c
---- work-50-base/fs/stat.c	2026-03-01 05:43:37.967072690 +0100
-+++ work/fs/stat.c	2026-03-01 06:09:41.093152614 +0100
-@@ -25,6 +25,9 @@
+diff --git a/fs/stat.c b/fs/stat.c
+index aa498a15a..34f24758d 100644
+--- a/fs/stat.c
++++ b/fs/stat.c
+@@ -28,6 +28,9 @@
  #include <linux/version.h>
  #endif
  #include <linux/uaccess.h>
@@ -361,7 +369,9 @@ diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/stat.c work/fs/stat.c
  #include <asm/unistd.h>
  
  #include "internal.h"
-@@ -251,2 +254,36 @@
+@@ -255,6 +258,40 @@ extern bool ksu_init_rc_hook __read_mostly;
+ extern void ksu_handle_vfs_fstat(int fd, loff_t *kstat_size_ptr);
+ #endif // #ifdef CONFIG_KSU_SUSFS
  
 +#ifdef CONFIG_ZEROMOUNT
 +static inline int zeromount_stat_hook(int dfd, struct filename *filename,
@@ -398,7 +408,9 @@ diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/stat.c work/fs/stat.c
 +}
 +#endif
  int vfs_fstat(int fd, struct kstat *stat)
-@@ -363,6 +400,16 @@
+ {
+ 	struct fd f;
+@@ -369,6 +406,16 @@ static int vfs_statx(int dfd, struct filename *filename, int flags,
  #endif
  
  
@@ -415,12 +427,13 @@ diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/stat.c work/fs/stat.c
  #ifdef CONFIG_KSU_SUSFS_UNICODE_FILTER
  	if (!IS_ERR(filename) && susfs_check_unicode_bypass(filename->uptr)) {
  		return -ENOENT;
-diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/statfs.c work/fs/statfs.c
---- work-50-base/fs/statfs.c	2026-03-01 05:27:32.061757439 +0100
-+++ work/fs/statfs.c	2026-03-01 06:09:41.093424141 +0100
+diff --git a/fs/statfs.c b/fs/statfs.c
+index 7c671f3a5..49f91e9cf 100644
+--- a/fs/statfs.c
++++ b/fs/statfs.c
 @@ -14,6 +14,9 @@
  #include "mount.h"
- #endif
+ #endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
  #include "internal.h"
 +#ifdef CONFIG_ZEROMOUNT
 +#include <linux/zeromount.h>
@@ -428,7 +441,7 @@ diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/statfs.c work/fs/statf
  
  static int flags_by_mnt(int mnt_flags)
  {
-@@ -118,7 +121,14 @@
+@@ -118,7 +121,14 @@ int user_statfs(const char __user *pathname, struct kstatfs *st)
  retry:
  	error = user_path_at(AT_FDCWD, pathname, lookup_flags, &path);
  	if (!error) {
@@ -443,9 +456,10 @@ diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/statfs.c work/fs/statf
  		path_put(&path);
  		if (retry_estale(error, lookup_flags)) {
  			lookup_flags |= LOOKUP_REVAL;
-diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/xattr.c work/fs/xattr.c
---- work-50-base/fs/xattr.c	2026-03-01 05:17:52.976475699 +0100
-+++ work/fs/xattr.c	2026-03-01 06:09:41.194492204 +0100
+diff --git a/fs/xattr.c b/fs/xattr.c
+index 05ec7e7d9..1355d12f3 100644
+--- a/fs/xattr.c
++++ b/fs/xattr.c
 @@ -24,6 +24,9 @@
  #include <linux/posix_acl_xattr.h>
  
@@ -456,8 +470,7 @@ diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/xattr.c work/fs/xattr.
  
  #include "internal.h"
  
-@@ -427,7 +430,13 @@
- ssize_t
+@@ -428,6 +431,12 @@ ssize_t
  vfs_getxattr(struct mnt_idmap *idmap, struct dentry *dentry,
  	     const char *name, void *value, size_t size)
  {
@@ -470,9 +483,11 @@ diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/xattr.c work/fs/xattr.
  	struct inode *inode = dentry->d_inode;
  	int error;
  
-diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/zeromount.c work/fs/zeromount.c
---- work-50-base/fs/zeromount.c	1970-01-01 01:00:00.000000000 +0100
-+++ work/fs/zeromount.c	2026-03-01 06:15:21.445071545 +0100
+diff --git a/fs/zeromount.c b/fs/zeromount.c
+new file mode 100644
+index 000000000..f2b76c785
+--- /dev/null
++++ b/fs/zeromount.c
 @@ -0,0 +1,1526 @@
 +#include <linux/module.h>
 +#include <linux/kernel.h>
@@ -2000,9 +2015,11 @@ diff '--color=auto' -ruN '--exclude=.git' work-50-base/fs/zeromount.c work/fs/ze
 +}
 +fs_initcall(zeromount_init);
 +
-diff '--color=auto' -ruN '--exclude=.git' work-50-base/include/linux/zeromount.h work/include/linux/zeromount.h
---- work-50-base/include/linux/zeromount.h	1970-01-01 01:00:00.000000000 +0100
-+++ work/include/linux/zeromount.h	2026-03-01 06:09:41.416477792 +0100
+diff --git a/include/linux/zeromount.h b/include/linux/zeromount.h
+new file mode 100644
+index 000000000..721d333d7
+--- /dev/null
++++ b/include/linux/zeromount.h
 @@ -0,0 +1,200 @@
 +#ifndef _LINUX_ZEROMOUNT_H
 +#define _LINUX_ZEROMOUNT_H

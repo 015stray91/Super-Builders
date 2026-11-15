@@ -24,14 +24,54 @@
       "add_nethunter": true
     },
     "darkmatter-vivobook": {
-      "name": "ASUS VivoBook Go 14/15 (DarkMatter NetHunter)",
+      "name": "ASUS Vivobook Go 14/15 (DarkMatter + NetHunter Pro)",
       "codename": "darkmatter-amd64",
-      "android_version": "android14",
-      "kernel_version": "6.8",
-      "sub_level": "12",
-      "kernel_source": "https://github.com/015stray91/Darkmatter-kernel.git",
-      "kernel_branch": "master",
+      "board_model": "E1404FA",
+      "board_apu": "AMD Mendocino (RDNA2)",
+      "android_version": "android16",
+      "kernel_version": "6.12",
+      "sub_level": ".117",
+      "arch": "x86_64",
+      "kernel_source": "https://github.com/015stray91/kernel-zenith.git",
+      "kernel_branch": "6.12_KSU",
+      "kernel_pin": "7042991a5c9ddae256f3864a598017310bb5ff2c",
+      "kernelsu": "KernelSU-Next",
+      "kernelsu_source": "https://github.com/KernelSU-Next/KernelSU-Next.git",
+      "kernelsu_pin": "4c706b5938665866ebe16944a481a7b91e3396af",
       "defconfig": "x86_64_defconfig",
+      "config_fragment": "6.12_nh-dark-matter-x86_64/config-darkmatter-nhpro-x86_64.fragment",
+      "pin_manifest": "6.12_nh-dark-matter-x86_64/pins.env",
+      "patch_dir": "6.12_nh-dark-matter-x86_64/KernelSU-Next",
+      "patches": [
+        "50_add_susfs_in_gki-android16-6.12.patch",
+        "51_enhanced_susfs-android16-6.12.patch",
+        "60_zeromount-android16-6.12.patch",
+        "70_ksu_next_susfs_x86_64_consolidated.patch"
+      ],
+      "nethunter": "pro-amd64",
+      "nethunter_ref": "6.12_android-x86",
+      "nethunter_dir": "kali-nethunter-kernel-builder-main",
+      "nethunter_payload": [
+        "initrd.img",
+        "ramdisk.img",
+        "config-pro"
+      ],
+      "obfuscation": {
+        "goat": {
+          "source": "https://github.com/015stray91/gimple-GCC-obfuscation-.git",
+          "gcc": "gcc-12",
+          "passes": [
+            "sub"
+          ],
+          "seed": "deadbeef"
+        },
+        "tigress": {
+          "source": "https://github.com/015stray91/Hikari-LLVM19.git",
+          "version": "4.1.0",
+          "enabled": false
+        }
+      },
+      "workflow": ".github/workflows/build-darkmatter-x86_64-nhpro.yml",
       "add_susfs": true,
       "add_zeromount": true,
       "add_zram": true,

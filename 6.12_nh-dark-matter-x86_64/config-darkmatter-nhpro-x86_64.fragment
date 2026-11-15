@@ -1,0 +1,177 @@
+# ============================================================================
+# DarkMatter x86_64 - NetHunter Pro - KernelSU-Next - SUSFS + ZeroMount
+# Target board: ASUS Vivobook Go 14/15  (E1404FA, AMD Mendocino APU, RDNA2)
+# ----------------------------------------------------------------------------
+# Merged on top of `make ARCH=x86_64 x86_64_defconfig` with merge_config.sh.
+# Only overrides that matter for this build are listed; everything else is
+# inherited from the stock defconfig.
+#
+# Wireless/GPU/audio on this board are MODULES on purpose: the NetHunter Pro
+# initrd loads them per-device, so they must not be linked into bzImage.
+# ============================================================================
+
+# ---------------------------------------------------------------- KernelSU --
+CONFIG_KSU=y
+# tree ships the x86_64 indirect-syscall hardening (X86_FEATURE_INDIRECT_SAFE),
+# so the dispatcher patch is NOT needed and must stay off.
+# CONFIG_KSU_X86_PATCH_SYSCALL_DISPATCHER is not set
+CONFIG_KPROBES=y
+CONFIG_KPROBE_EVENTS=y
+CONFIG_HAVE_KPROBES=y
+CONFIG_MODULES=y
+CONFIG_MODULE_UNLOAD=y
+
+# ------------------------------------------------------------------- SUSFS --
+CONFIG_KSU_SUSFS=y
+CONFIG_KSU_SUSFS_SUS_MOUNT=y
+CONFIG_KSU_SUSFS_SUS_PATH=y
+CONFIG_KSU_SUSFS_SUS_KSTAT=y
+CONFIG_KSU_SUSFS_SUS_KSTAT_REDIRECT=y
+CONFIG_KSU_SUSFS_SUS_MAP=y
+CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
+CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
+CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
+CONFIG_KSU_SUSFS_UNICODE_FILTER=y
+CONFIG_KSU_SUSFS_ENABLE_LOG=y
+
+# --------------------------------------------------------------- ZeroMount --
+CONFIG_ZEROMOUNT=y
+
+# ------------------------------------------------------------- memory/zram --
+CONFIG_ZSMALLOC=m
+CONFIG_ZRAM=m
+CONFIG_ZRAM_WRITEBACK=y
+CONFIG_ZRAM_BACKEND_LZ4=y
+CONFIG_ZRAM_BACKEND_LZ4HC=y
+CONFIG_ZRAM_BACKEND_ZSTD=y
+CONFIG_ZRAM_BACKEND_DEFLATE=y
+CONFIG_ZRAM_DEF_COMP_LZ4=y
+CONFIG_ZRAM_DEF_COMP="lz4"
+CONFIG_CRYPTO_LZ4=y
+CONFIG_CRYPTO_LZ4HC=y
+CONFIG_CRYPTO_LZO=y
+CONFIG_CRYPTO_ZSTD=y
+CONFIG_CRYPTO_842=y
+CONFIG_KERNEL_ZSTD=y
+
+# --------------------------------------------------------------- overlayfs --
+CONFIG_OVERLAY_FS=m
+CONFIG_OVERLAY_FS_REDIRECT_ALWAYS_FOLLOW=y
+CONFIG_TMPFS_XATTR=y
+CONFIG_TMPFS_POSIX_ACL=y
+CONFIG_FUSE_FS=y
+
+# ------------------------------------------------------- ASUS Vivobook Go 14/15
+# AMD Mendocino / RDNA2 APU - graphics, sensor hub, platform plumbing
+CONFIG_X86_AMD_PLATFORM_DEVICE=y
+CONFIG_AMD_NB=y
+CONFIG_AMD_MEM_ENCRYPT=y
+CONFIG_PINCTRL_AMD=y
+CONFIG_DRM_AMDGPU=m
+CONFIG_DRM_AMD_DC=y
+CONFIG_AMD_PMC=m
+CONFIG_AMD_SFH_HID=m
+CONFIG_CHROME_PLATFORMS=y
+
+# display panel / backlight
+CONFIG_BACKLIGHT_CLASS_DEVICE=y
+CONFIG_PWM=y
+CONFIG_BACKLIGHT_PWM=m
+CONFIG_DRM_PANEL=y
+CONFIG_DRM_DISPLAY_DP_AUX_CHARDEV=y
+
+# input: trackpad + touchscreen + keyboard
+CONFIG_I2C_HID=m
+CONFIG_I2C_HID_ACPI=m
+CONFIG_HID_MULTITOUCH=m
+CONFIG_HID_GENERIC=m
+CONFIG_INPUT_EVDEV=y
+CONFIG_MOUSE_ELAN_I2C=m
+CONFIG_MOUSE_ELAN_I2C_I2C=y
+CONFIG_MOUSE_PS2_SYNAPTICS=y
+CONFIG_MOUSE_PS2_SYNAPTICS_SMBUS=y
+
+# audio: AMD ACP + Realtek HDA CODEC
+CONFIG_SND_HDA=m
+CONFIG_SND_HDA_INTEL=m
+CONFIG_SND_HDA_CODEC_REALTEK=m
+CONFIG_SND_HDA_CODEC_HDMI=m
+CONFIG_SND_SOC=m
+CONFIG_SND_SOC_AMD_ACP=m
+
+# networking: Wi-Fi 6 + BT + wired
+CONFIG_CFG80211=m
+CONFIG_MAC80211=m
+CONFIG_RTW89=m
+CONFIG_RTW89_8852BE=m
+CONFIG_RTW88=m
+CONFIG_MT76_CORE=m
+CONFIG_MT7921E=m
+CONFIG_IWLWIFI=m
+CONFIG_BT=m
+CONFIG_BT_HCIBTUSB=m
+CONFIG_R8169=m
+
+# USB / Type-C / storage
+CONFIG_USB_XHCI_HCD=y
+CONFIG_USB_XHCI_PCI=y
+CONFIG_TYPEC=m
+CONFIG_TYPEC_UCSI=m
+CONFIG_UCSI_ACPI=m
+CONFIG_USB4=m
+CONFIG_NVME_CORE=y
+CONFIG_BLK_DEV_NVME=y
+
+# firmware / EFI boot
+CONFIG_EFI=y
+CONFIG_EFI_STUB=y
+CONFIG_PSTORE=y
+CONFIG_FB=y
+CONFIG_FB_EFI=y
+CONFIG_DRM_SIMPLEDRM=y
+CONFIG_FRAMEBUFFER_CONSOLE=y
+CONFIG_FRAMEBUFFER_CONSOLE_DETECT_PRIMARY=y
+
+# ------------------------------------------------------- NetHunter Pro bits --
+# Kali tooling relies on these for packet work in the chroot
+CONFIG_IP_NF_IPTABLES=y
+CONFIG_IP_NF_FILTER=y
+CONFIG_IP_NF_NAT=y
+CONFIG_IP6_NF_IPTABLES=y
+CONFIG_NF_TABLES=y
+CONFIG_NETFILTER_XTABLES=y
+CONFIG_NETFILTER_ADVANCED=y
+CONFIG_IP_NF_MANGLE=y
+CONFIG_NETFILTER_XT_TARGET_HL=y
+CONFIG_IP_SET=y
+CONFIG_IP_SET_MAX=65534
+CONFIG_BRIDGE=y
+CONFIG_VETH=y
+CONFIG_TUN=y
+CONFIG_MACVLAN=y
+CONFIG_PACKET=y
+CONFIG_UNIX=y
+CONFIG_INET=y
+CONFIG_TCP_CONG_ADVANCED=y
+CONFIG_TCP_CONG_BBR=y
+CONFIG_TCP_CONG_CUBIC=y
+CONFIG_NET_SCH_FQ=y
+CONFIG_HIDRAW=y
+CONFIG_USB_GADGET=m
+CONFIG_USB_CONFIGFS=m
+
+# ------------------------------------------------- Debug / introspection -----
+CONFIG_KALLSYMS=y
+CONFIG_KALLSYMS_ALL=y
+CONFIG_DEBUG_INFO=y
+CONFIG_DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT=y
+# BTF is left off: vmlinux BTF is very large and NetHunter does not require it.
+# CONFIG_DEBUG_INFO_BTF is not set
+CONFIG_MODULE_COMPRESS=y
+CONFIG_MODULE_COMPRESS_XZ=y
+
+# ------------------------------------------------------------- boot cmdline --
+CONFIG_CMDLINE_BOOL=y
+CONFIG_CMDLINE="quiet syscall_hardening=off"
+CONFIG_CMDLINE_OVERRIDE=n
