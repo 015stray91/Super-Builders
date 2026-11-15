@@ -21,7 +21,7 @@ jobs:
 
     steps:
       - name: Checkout Super-Builders (for device-profiles.json)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: super-builders
           fetch-depth: 1
@@ -57,7 +57,7 @@ jobs:
           echo "add_nethunter=$(echo "$PROFILE" | jq -r .add_nethunter)" >> $GITHUB_OUTPUT
 
       - name: Maximize Build Space
-        uses: easimon/maximize-build-space@master
+        uses: easimon/maximize-build-space@v10
         with:
           root-reserve-mb: 1024
           swap-size-mb: 4096
@@ -280,7 +280,7 @@ jobs:
           fi
 
       - name: Upload NUKI
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: AnyRealm-NUKI-${{ inputs.device_codename }}-${{ github.run_number }}

@@ -40,7 +40,7 @@ jobs:
 
     steps:
       - name: Checkout Super-Builders
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: sb
 
@@ -97,7 +97,7 @@ jobs:
             gcc-12 gcc-12-plugin-dev cmake ninja-build perl
 
       - name: Cache kernel source
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: /tmp/kernel
           key: kz-${{ steps.pins.outputs.kernel_pin }}-${{ steps.pins.outputs.kernel_branch }}
@@ -260,7 +260,7 @@ jobs:
           ( cd "$B" && find . -maxdepth 2 -type f -printf '%10s  %p\n' | sort -k2 )
 
       - name: Upload artefacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: darkmatter-nhpro-x86_64
           path: |

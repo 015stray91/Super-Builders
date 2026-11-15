@@ -37,7 +37,7 @@ jobs:
     timeout-minutes: 120
     steps:
       - name: Checkout Super-Builders (for colonel tier + patches)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: super-builders
           fetch-depth: 1
@@ -163,7 +163,7 @@ jobs:
           ls -la kernel-source/out/*.ko 2>/dev/null | head -10
 
       - name: Upload Colonel Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: colonel-kernel-image
           path: |

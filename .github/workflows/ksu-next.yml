@@ -61,7 +61,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
     - name: Free Disk Space
-      uses: endersonmenezes/free-disk-space@v3
+      uses: endersonmenezes/free-disk-space@v4
       with:
         remove_android: true
         remove_dotnet: true
@@ -78,7 +78,7 @@ jobs:
         sudo apt-get install -y lld binutils git ccache automake flex lzop bison gperf build-essential zip curl zlib1g-dev g++-multilib libxml2-utils bzip2 libbz2-dev libssl-dev libncurses5-dev libgl1-mesa-dev libxml2 lib32z1-dev python3 bc libelf-dev
 
     - name: Checkout Build Configurations
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Set Up Environment Environment Variables
       run: |
@@ -145,7 +145,7 @@ jobs:
         } >> "$GITHUB_STEP_SUMMARY"
 
     - name: Upload Finished Deployment Output Artifact Base
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: ${{ inputs.device_codename }}-KernelSU-Next-Deployment
         path: "${{ github.workspace }}/*.zip"
