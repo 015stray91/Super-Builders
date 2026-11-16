@@ -250,8 +250,14 @@ jobs:
             --out $WORK/out
             --name "DarkMatter-NetHunter-KSU-6.12-amd64.iso"
           )
-          [ "$FUSE_ROOTFS" = "true" ] && args+=(--kalifs $WORK/kali-rootfs.tar.xz)
-          [ "$FUSE_APKS" = "true" ]   && args+=(--apk-src $WORK/apks)
+          # if/then, not `[ ... ] && args+=(...)`: under set -e a false test
+          # makes the whole && expression return 1 and kills the step.
+          if [ "$FUSE_ROOTFS" = "true" ]; then
+            args+=(--kalifs "$WORK/kali-rootfs.tar.xz")
+          fi
+          if [ "$FUSE_APKS" = "true" ]; then
+            args+=(--apk-src "$WORK/apks")
+          fi
 
           chmod +x sb/fuse_darkmatter_nh.sh
           sb/fuse_darkmatter_nh.sh "${args[@]}"

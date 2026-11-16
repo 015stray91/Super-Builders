@@ -153,12 +153,23 @@ if [ -n "$SYSTEM_IMG" ] && [ "$NO_FUSE" -eq 0 ]; then
         sys_phrase="already unpacked, so it is only copied and repacked"
     fi
 fi
-# gh copy + sysroot in place + repacked sfs + the final ISO.
-need=$(( gh_sz + sys_unpacked + sys_unpacked / 3 + gh_sz / 10 ))
+# Kali rootfs: it is copied into the system tree verbatim, so it costs its own
+# size inside the sysroot *and* again inside the rebuilt image.  Ignoring it
+# here means a build that dies at the last mksquashfs.
+kali_sz=0
+if [ -n "$KALIFS" ] && [ -f "$KALIFS" ] && [ "$NO_FUSE" -eq 0 ]; then
+    kali_sz=$(stat -c %s "$KALIFS")
+fi
+
+# gh copy + sysroot in place + repacked sfs + the final ISO + the rootfs twice.
+need=$(( gh_sz + sys_unpacked + sys_unpacked / 3 + gh_sz / 10 + kali_sz * 2 ))
 avail=$(df -B1 --output=avail "$OUT_DIR" | tail -1 | tr -d ' ')
 echo "  boot tree:   $(numfmt --to=iec "$gh_sz")"
 if [ "$sys_unpacked" -gt 0 ]; then
     echo "  system:      $(numfmt --to=iec "$sys_sz") -- $sys_phrase"
+fi
+if [ "$kali_sz" -gt 0 ]; then
+    echo "  rootfs:      $(numfmt --to=iec "$kali_sz") (counted twice: sysroot + image)"
 fi
 echo "  estimated:   $(numfmt --to=iec "$need")"
 echo "  available:   $(numfmt --to=iec "$avail")"
