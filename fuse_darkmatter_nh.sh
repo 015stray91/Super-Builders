@@ -83,8 +83,12 @@ mkdir -p "$MNT" "$ISO_ROOT"
 
 cleanup() {
     mountpoint -q "$MNT" 2>/dev/null && sudo umount "$MNT" || true
+    mountpoint -q "$WORK/wrapper" 2>/dev/null && sudo umount "$WORK/wrapper" || true
+    mountpoint -q "$WORK/mntimg" 2>/dev/null && sudo umount "$WORK/mntimg" || true
     # The sysroot is assembled with sudo, so the work dir is root-owned in
-    # places; a plain rm -rf leaves it behind and fails noisily.
+    # places; a plain rm -rf leaves it behind and fails noisily.  A mount left
+    # behind here also makes the directory undeletable and quietly eats the
+    # disk until the next reboot.
     [ "$KEEP_WORK" -eq 1 ] || sudo rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -249,10 +253,21 @@ else
         echo "  system root: $SYS (directory)"
     elif unsquashfs -s "$SYSTEM_IMG" >/dev/null 2>&1; then
         WRAPPER="$(basename "$SYSTEM_IMG")"
-        echo "  $(basename "$SYSTEM_IMG") is a squashfs wrapper -- unwrapping"
+        echo "  $(basename "$SYSTEM_IMG") is a squashfs wrapper"
+        # Mount the wrapper rather than unpacking it.  Extracting a real
+        # system.sfs puts a 2 GB system.img on disk that is deleted again a
+        # minute later; mounting it costs nothing and is the same mechanism the
+        # initrd uses, so it also proves the file is mountable.
         mkdir -p "$WORK/wrapper"
-        sudo unsquashfs -f -d "$WORK/wrapper" "$SYSTEM_IMG" >/dev/null
-        INNER="$(find "$WORK/wrapper" -maxdepth 1 -name 'system.img' -print -quit)"
+        if sudo mount -o loop,ro "$SYSTEM_IMG" "$WORK/wrapper" 2>/dev/null; then
+            echo "  mounted the wrapper (no extraction, saves ~2 GB)"
+            INNER="$WORK/wrapper/system.img"
+            [ -e "$INNER" ] || INNER="$(find "$WORK/wrapper" -maxdepth 1 -name 'system.img' -print -quit)"
+        else
+            echo "  mount failed -- extracting instead"
+            sudo unsquashfs -f -d "$WORK/wrapper" "$SYSTEM_IMG" >/dev/null
+            INNER="$(find "$WORK/wrapper" -maxdepth 1 -name 'system.img' -print -quit)"
+        fi
         if [ -z "$INNER" ]; then
             # Not the android-x86 shape.  Treat the squashfs contents as the
             # tree directly -- that is what a repack must then reproduce.
@@ -423,7 +438,6 @@ EOF
     # first, then wrap that single file.
     note "Repacking system image"
 
-    IMG="$WORK/system.img"
     ROOT="$WORK/sysroot"
     [ -d "$ROOT/system" ] && ROOT="$ROOT/system"
 
@@ -434,19 +448,27 @@ EOF
     echo "  payload:   $(numfmt --to=iec $((used_kb*1024)))"
     echo "  image size: $(numfmt --to=iec $((img_kb*1024))) (payload + 15% + 64M slack)"
 
+    # Build the image directly at the path the wrapper needs.  A separate copy
+    # step would duplicate ~2 GB on disk for no reason, and this is the step
+    # that runs closest to the free-space limit.
+    rm -rf "$WORK/wrapdir" "$ISO_ROOT/system.sfs"
+    mkdir -p "$WORK/wrapdir"
+    IMG="$WORK/wrapdir/system.img"
     rm -f "$IMG"
     truncate -s "$((img_kb*1024))" "$IMG"
     # -d root_dir makes mke2fs populate the filesystem itself, which preserves
-    # ownership, modes and (with -E root_owner) the read-only system layout.
+    # ownership, modes and the read-only system layout.
     sudo mke2fs -q -t ext4 -b 4096 -L system -d "$ROOT" "$IMG"
     sudo e2fsck -f -y "$IMG" >/dev/null 2>&1 || true
     echo "  system.img: $(du -h "$IMG" | cut -f1), $(dumpe2fs -h "$IMG" 2>/dev/null | awk '/Free blocks/{printf "%.0f MB free", $3*4/1000}')"
 
+    # The unpacked tree is no longer needed once it is inside the image, and
+    # for a real system it is ~2 GB.  Freeing it here is what keeps the peak
+    # under the space estimate.
+    sudo rm -rf "$WORK/sysroot"
+
     # Wrap it.  gzip, not xz: the base image is gzip and the initrd mounts it
     # before anything else, so stay on the format that is known to work here.
-    rm -rf "$WORK/wrapdir" "$ISO_ROOT/system.sfs"
-    mkdir -p "$WORK/wrapdir"
-    sudo cp "$IMG" "$WORK/wrapdir/system.img"
     sudo chown -R "$(id -u):$(id -g)" "$WORK/wrapdir"
     mksquashfs "$WORK/wrapdir" "$ISO_ROOT/system.sfs" \
         -comp gzip -b 128K -noappend -no-progress >/dev/null
