@@ -128,17 +128,17 @@ jobs:
           mkdir -p $WORK/kern
           gh run download "$RUN_ID" -R "${{ github.repository }}" \
             -n darkmatter-nhpro-x86_64 -D $WORK/kern
-          find $WORK/kern -maxdepth 3 -name vmlinuz -o -maxdepth 3 -name System.map | head
+          find $WORK/kern -maxdepth 3 \( -name vmlinuz -o -name System.map \) -print
 
       - name: Normalise the kernel payload
         run: |
           set -euo pipefail
           # The artifact nests things a couple of levels deep (boot/, out/).
-          V=$(find $WORK/kern -name vmlinuz -type f | head -1)
+          V=$(find $WORK/kern -name vmlinuz -type f -print -quit)
           [ -n "$V" ] || { echo "no vmlinuz in artifact" >&2; exit 1; }
           mkdir -p $WORK/kdir
           cp "$V" $WORK/kdir/vmlinuz
-          M=$(find $WORK/kern -type d -path '*lib/modules/*' -name '6.12*' | head -1)
+          M=$(find $WORK/kern -type d -path '*lib/modules/*' -name '6.12*' -print -quit)
           if [ -n "$M" ]; then
             mkdir -p $WORK/kdir/modules/lib/modules
             cp -a "$M" $WORK/kdir/modules/lib/modules/
@@ -150,12 +150,21 @@ jobs:
           # Kernel config sanity: squashfs must be built in, or the image cannot
           # be mounted at boot (this is the bug that made the first build boot
           # to a black screen).
-          C=$(find $WORK/kern -name config -type f | head -1)
+          # config or config.gz -- the artifact carries one of them.
+          C=$(find $WORK/kern -name 'config*' -type f -print -quit)
           if [ -n "$C" ]; then
-            for o in CONFIG_SQUASHFS CONFIG_BLK_DEV_LOOP CONFIG_EXT4_FS; do
-              grep -q "^$o=y" "$C" || { echo "::error::$o is not =y in the built kernel"; exit 1; }
+            case "$C" in
+              *.gz) CFG=$(mktemp "$WORK/cfg.XXXXXX"); gzip -dc "$C" > "$CFG" ;;
+              *)    CFG="$C" ;;
+            esac
+            for o in CONFIG_SQUASHFS CONFIG_BLK_DEV_LOOP CONFIG_EXT4_FS \
+                     CONFIG_SQUASHFS_XZ CONFIG_BLK_DEV_INITRD CONFIG_RD_GZIP; do
+              grep -q "^$o=y" "$CFG" \
+                || { echo "::error::$o is not =y -- the kernel cannot mount the system image"; exit 1; }
             done
-            echo "kernel config: squashfs/loop/ext4 built in"
+            echo "kernel config: squashfs/loop/ext4/initrd built in"
+          else
+            echo "::warning::no kernel config in the artifact; skipped the squashfs check"
           fi
 
       - name: Fetch the DarkMatter base ISO
@@ -255,7 +264,7 @@ jobs:
           echo "--- boot records"
           xorriso -indev "$ISO" -report_el_torito plain 2>/dev/null | grep -E "El Torito"
           echo "--- top level"
-          xorriso -indev "$ISO" -find / -maxdepth 1 2>/dev/null | head -20
+          xorriso -indev "$ISO" -find / -maxdepth 1 2>/dev/null || true
           {
             echo "iso:    $(basename "$ISO")"
             echo "bytes:  $(stat -c %s "$ISO")"
