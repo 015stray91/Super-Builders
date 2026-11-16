@@ -223,34 +223,102 @@ elif [ -z "$SYSTEM_IMG" ]; then
     echo "  Pass --system <system.sfs|system.img|system/> to fuse the rootfs in."
 else
     note "Fusing NetHunter into $(basename "$SYSTEM_IMG")"
-    mkdir -p "$WORK/sysroot"
 
+    # The DarkMatter boot chain mounts the system in two layers:
+    #
+    #   mount -o loop /mnt/$SRC/system.sfs /sfs     <- squashfs wrapper
+    #   mount -o loop /sfs/system.img system        <- ext4, the real system
+    #
+    # So system.sfs is not a directory tree, it is a container holding one
+    # file named system.img.  Editing it means unpacking the wrapper, mounting
+    # the inner image, changing that, then rebuilding both layers.
+    #
+    # --system accepts either layer:
+    #   system.sfs   wrapper  -> unwrap to the inner system.img
+    #   system.img   inner fs -> use directly
+    #   system/      directory -> skip straight to "already unpacked"
+    WRAPPER=""
+    INNER=""
     SYS_IS_DIR=0
-    [ -d "$SYSTEM_IMG" ] && SYS_IS_DIR=1
 
-    if [ "$SYS_IS_DIR" -eq 0 ]; then
-        # A system.sfs is a squashfs; a system.img is ext4.  Try squashfs
-        # first, since that is what android-x86 ships.
-        if unsquashfs -s "$SYSTEM_IMG" >/dev/null 2>&1; then
-            sudo unsquashfs -f -d "$WORK/sysroot" "$SYSTEM_IMG" >/dev/null
+    if [ -d "$SYSTEM_IMG" ]; then
+        SYS_IS_DIR=1
+        SYS="$SYSTEM_IMG"
+        # A plain directory may or may not have the android top-level "system".
+        [ -d "$SYS/system" ] && SYS="$SYS/system"
+        echo "  system root: $SYS (directory)"
+    elif unsquashfs -s "$SYSTEM_IMG" >/dev/null 2>&1; then
+        WRAPPER="$(basename "$SYSTEM_IMG")"
+        echo "  $(basename "$SYSTEM_IMG") is a squashfs wrapper -- unwrapping"
+        mkdir -p "$WORK/wrapper"
+        sudo unsquashfs -f -d "$WORK/wrapper" "$SYSTEM_IMG" >/dev/null
+        INNER="$(find "$WORK/wrapper" -maxdepth 1 -name 'system.img' -print -quit)"
+        if [ -z "$INNER" ]; then
+            # Not the android-x86 shape.  Treat the squashfs contents as the
+            # tree directly -- that is what a repack must then reproduce.
+            SYS_IS_DIR=1
+            SYS="$WORK/wrapper/system"
+            [ -d "$SYS" ] || SYS="$WORK/wrapper"
+            WRAPPER=""
+            echo "  no system.img inside -- treating the squashfs as a plain tree"
         else
-            sudo mount -o loop,ro "$SYSTEM_IMG" "$MNT"
+            echo "  inner image: $(basename "$INNER") ($(stat -c %s "$INNER") bytes)"
+            sudo mount -o loop,ro "$INNER" "$MNT"
+            SYS="$WORK/sysroot/system"
+            sudo mkdir -p "$WORK/sysroot"
             sudo rsync -a "$MNT/" "$WORK/sysroot/"
             sudo umount "$MNT"
+            [ -d "$SYS" ] || SYS="$WORK/sysroot"
+            echo "  system root: $SYS (extracted from system.img)"
         fi
     else
-        sudo rsync -a "$SYSTEM_IMG/" "$WORK/sysroot/"
+        # A bare ext4 system.img, or a sparse one.
+        INNER="$SYSTEM_IMG"
+        echo "  treating $(basename "$SYSTEM_IMG") as a filesystem image"
+        MNTIMG="$WORK/mntimg"
+        mkdir -p "$MNTIMG"
+        if ! sudo mount -o loop,ro "$SYSTEM_IMG" "$MNTIMG" 2>/dev/null; then
+            command -v simg2img >/dev/null || die "cannot mount $SYSTEM_IMG and simg2img is missing"
+            echo "  direct mount failed -- converting from sparse"
+            simg2img "$SYSTEM_IMG" "$WORK/system.raw"
+            sudo mount -o loop,ro "$WORK/system.raw" "$MNTIMG"
+        fi
+        sudo mkdir -p "$WORK/sysroot"
+        sudo rsync -a "$MNTIMG/" "$WORK/sysroot/"
+        sudo umount "$MNTIMG"
+        SYS="$WORK/sysroot/system"
+        [ -d "$SYS" ] || SYS="$WORK/sysroot"
+        echo "  system root: $SYS (extracted from image)"
     fi
 
-    SYS="$WORK/sysroot/system"
-    [ -d "$SYS" ] || SYS="$WORK/sysroot"
-    echo "  system root: $SYS"
-
     # --- modules -> /system/lib/modules ---
+    #
+    # The base image carries modules for 4.14.90-*-Darkmatter_comet (2451 .ko,
+    # 179 MB).  Under our 6.12 kernel every one of them is unusable: the initrd
+    # does `modprobe` against /lib/modules/`uname -r`, so it needs a directory
+    # named for OUR kernel, and a stray 4.14 tree just wastes space in an image
+    # that only has ~90 MB free.  Drop the old tree, install ours.
     if [ -n "$(ls -A "$MODS" 2>/dev/null)" ]; then
         sudo mkdir -p "$SYS/lib/modules"
+        if [ -d "$SYS/lib/modules" ]; then
+            for d in "$SYS"/lib/modules/*/; do
+                [ -d "$d" ] || continue
+                case "$(basename "$d")" in
+                    6.12*|*"$(cat "$KERNEL_DIR/kernel-version" 2>/dev/null || echo __none__)"*) ;;
+                    *)
+                        sudo rm -rf "$d"
+                        echo "  removed stale $(basename "$d")"
+                        ;;
+                esac
+            done
+        fi
         sudo rsync -a "$MODS/" "$SYS/lib/modules/"
-        echo "  modules merged into /system/lib/modules"
+        echo "  modules -> /system/lib/modules: $(find "$SYS/lib/modules" -name '*.ko*' | wc -l) files"
+        for d in "$SYS"/lib/modules/*/; do
+            [ -d "$d" ] && echo "    $(basename "$d")"
+        done
+    else
+        echo "  warning: no modules staged -- the base 4.14 modules will never load"
     fi
 
     # --- NetHunter payload: nh-unpacked is a Magisk module ---
@@ -309,7 +377,9 @@ else
     fi
 
     # --- first-boot extraction + module script ---
-    sudo mkdir -p "$SYS/etc/init"
+    # Both dirs must exist before tee runs; the Kali block above only creates
+    # /system/etc/nethunter when it actually found a rootfs.
+    sudo mkdir -p "$SYS/etc/init" "$SYS/etc/nethunter"
     sudo tee "$SYS/etc/init/nethunter.rc" >/dev/null <<'EOF'
 on property:sys.boot_completed=1
     mkdir /data/local/nhsystem 0770 root root
@@ -340,12 +410,55 @@ echo "--- done"
 EOF
     sudo chmod 0755 "$SYS/etc/nethunter/nh-firstboot.sh"
 
-    # --- repack ---
+    # --- repack ---------------------------------------------------------------
+    #
+    # Two layers, and the order matters:
+    #
+    #   system.img   ext4, contains the /system tree
+    #   system.sfs   squashfs wrapper containing exactly one file: system.img
+    #
+    # The initrd does `mount -o loop system.sfs /sfs` then
+    # `mount -o loop /sfs/system.img system`, so a squashfs of a plain directory
+    # would mount and then have no system.img to open.  Build the ext4 image
+    # first, then wrap that single file.
     note "Repacking system image"
-    rm -f "$ISO_ROOT/system.sfs"
-    sudo mksquashfs "$WORK/sysroot" "$ISO_ROOT/system.sfs" -comp xz -b 1M -noappend >/dev/null
-    sudo chown "$(id -u):$(id -g)" "$ISO_ROOT/system.sfs"
-    echo "  $(du -h "$ISO_ROOT/system.sfs" | cut -f1) system.sfs"
+
+    IMG="$WORK/system.img"
+    ROOT="$WORK/sysroot"
+    [ -d "$ROOT/system" ] && ROOT="$ROOT/system"
+
+    used_kb=$(sudo du -sk "$ROOT" | cut -f1)
+    # ext4 needs room for metadata and the journal; 15% headroom is enough for
+    # a mostly-read-only system partition and keeps the image from being huge.
+    img_kb=$(( used_kb + used_kb / 6 + 65536 ))
+    echo "  payload:   $(numfmt --to=iec $((used_kb*1024)))"
+    echo "  image size: $(numfmt --to=iec $((img_kb*1024))) (payload + 15% + 64M slack)"
+
+    rm -f "$IMG"
+    truncate -s "$((img_kb*1024))" "$IMG"
+    # -d root_dir makes mke2fs populate the filesystem itself, which preserves
+    # ownership, modes and (with -E root_owner) the read-only system layout.
+    sudo mke2fs -q -t ext4 -b 4096 -L system -d "$ROOT" "$IMG"
+    sudo e2fsck -f -y "$IMG" >/dev/null 2>&1 || true
+    echo "  system.img: $(du -h "$IMG" | cut -f1), $(dumpe2fs -h "$IMG" 2>/dev/null | awk '/Free blocks/{printf "%.0f MB free", $3*4/1000}')"
+
+    # Wrap it.  gzip, not xz: the base image is gzip and the initrd mounts it
+    # before anything else, so stay on the format that is known to work here.
+    rm -rf "$WORK/wrapdir" "$ISO_ROOT/system.sfs"
+    mkdir -p "$WORK/wrapdir"
+    sudo cp "$IMG" "$WORK/wrapdir/system.img"
+    sudo chown -R "$(id -u):$(id -g)" "$WORK/wrapdir"
+    mksquashfs "$WORK/wrapdir" "$ISO_ROOT/system.sfs" \
+        -comp gzip -b 128K -noappend -no-progress >/dev/null
+    echo "  system.sfs: $(du -h "$ISO_ROOT/system.sfs" | cut -f1) (wraps system.img)"
+
+    # Verify the wrapper really contains system.img -- this is the exact thing
+    # that silently breaks the boot if it is wrong.
+    if unsquashfs -l "$ISO_ROOT/system.sfs" 2>/dev/null | grep -q 'system\.img$'; then
+        echo "  verified: system.sfs contains system.img"
+    else
+        die "system.sfs does not contain system.img -- this ISO would not boot"
+    fi
 fi
 
 # ------------------------------------------------------------------------------

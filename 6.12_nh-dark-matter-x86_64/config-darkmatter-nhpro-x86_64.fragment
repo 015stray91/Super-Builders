@@ -62,6 +62,35 @@ CONFIG_TMPFS_XATTR=y
 CONFIG_TMPFS_POSIX_ACL=y
 CONFIG_FUSE_FS=y
 
+# ---------------------------------------------------------- android-x86 boot --
+# The DarkMatter initrd mounts the system in two steps:
+#
+#   mount -o loop /mnt/$SRC/system.sfs /sfs
+#   mount -o loop /sfs/system.img system
+#
+# so squashfs *and* loop *and* ext4 must all be available before system.img is
+# reachable.  x86_64_defconfig carries none of squashfs -- without these the
+# kernel boots and then cannot find a root filesystem.  Values mirror the
+# proven config-pro from the NetHunter Pro tree.
+#
+# All of these are =y, not =m.  The initrd carries no modules of its own and
+# never modprobes squashfs -- it has to mount system.sfs before any module
+# could be read, so they are only reachable if built into the kernel.
+CONFIG_SQUASHFS=y
+CONFIG_SQUASHFS_XZ=y
+CONFIG_SQUASHFS_LZ4=y
+CONFIG_SQUASHFS_ZSTD=y
+CONFIG_BLK_DEV_LOOP=y
+CONFIG_BLK_DEV_INITRD=y
+CONFIG_RD_GZIP=y
+CONFIG_DEVTMPFS=y
+CONFIG_DEVTMPFS_MOUNT=y
+CONFIG_EXT4_FS=y
+CONFIG_ISO9660_FS=y
+CONFIG_TMPFS=y
+CONFIG_SYSFS=y
+CONFIG_PROC_FS=y
+
 # ------------------------------------------------------- ASUS Vivobook Go 14/15
 # AMD Mendocino / RDNA2 APU - graphics, sensor hub, platform plumbing
 CONFIG_X86_AMD_PLATFORM_DEVICE=y
@@ -72,7 +101,20 @@ CONFIG_DRM_AMDGPU=m
 CONFIG_DRM_AMD_DC=y
 CONFIG_AMD_PMC=m
 CONFIG_AMD_SFH_HID=m
-CONFIG_CHROME_PLATFORMS=y
+CONFIG_AMD_PMF=m
+CONFIG_AMD_PMF_DEBUG=y
+CONFIG_ACPI_AC=m
+CONFIG_ACPI_BATTERY=m
+CONFIG_ACPI_THERMAL=y
+CONFIG_THERMAL=y
+CONFIG_THERMAL_DEFAULT_GOV_STEP_WISE=y
+# Intel symbols cannot be enabled on this AMD board -- drop them rather than
+# carry dead config that olddefconfig has to clean up.
+# CONFIG_X86_PKG_TEMP_THERMAL is not set
+# CONFIG_INTEL_POWERCLAMP is not set
+CONFIG_ACPI_PROCESSOR=y
+CONFIG_X86_ACPI_CPUFREQ=m
+CONFIG_X86_AMD_FREQ_SENSITIVITY=m
 
 # display panel / backlight
 CONFIG_BACKLIGHT_CLASS_DEVICE=y
@@ -107,6 +149,7 @@ CONFIG_RTW89=m
 CONFIG_RTW89_8852BE=m
 CONFIG_RTW88=m
 CONFIG_MT76_CORE=m
+CONFIG_MT76_USB=m
 CONFIG_MT7921E=m
 CONFIG_IWLWIFI=m
 CONFIG_BT=m
