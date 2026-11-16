@@ -143,19 +143,25 @@ jobs:
           ls -l /tmp/base.iso
           file /tmp/base.iso | grep -q ISO || { echo "not an ISO image" >&2; exit 1; }
 
-      - name: Unpack the base ISO
+      - name: Check the base ISO has what we need
         run: |
           set -euo pipefail
-          mkdir -p /tmp/isoroot
-          # xorriso extracts the ISO9660 tree; no loop mount, no root needed.
-          xorriso -osirrox on -indev /tmp/base.iso \
-            -extract / /tmp/isoroot 2>/dev/null
-          chmod -R u+w /tmp/isoroot
-          ls /tmp/isoroot
-          for f in isolinux/isolinux.bin boot/grub/efi.img findme; do
-            [ -e "/tmp/isoroot/$f" ] || { echo "base ISO missing $f" >&2; exit 1; }
+          # The fuse script extracts the ISO itself; just prove the boot
+          # images are present so a bad download fails here, not mid-repack.
+          #
+          # xorriso exits 0 even for a missing path, and its -exec lsdl column
+          # layout shifts with the date, so parsing it is fragile.  Extract the
+          # two files and stat them instead -- unambiguous.
+          mkdir -p /tmp/probe
+          for f in isolinux/isolinux.bin boot/grub/efi.img; do
+            rm -f "/tmp/probe/${f##*/}"
+            xorriso -osirrox on -indev /tmp/base.iso \
+              -extract "/$f" "/tmp/probe/${f##*/}" >/dev/null 2>&1 || true
+            sz=$(stat -c %s "/tmp/probe/${f##*/}" 2>/dev/null || echo 0)
+            [ "$sz" -gt 0 ] \
+              || { echo "base ISO: /$f missing or empty" >&2; exit 1; }
+            echo "base ISO: /$f ($sz bytes)"
           done
-          rm -f /tmp/base.iso
 
       - name: Fetch the Kali NetHunter rootfs
         if: ${{ inputs.fuse_rootfs }}
@@ -187,9 +193,11 @@ jobs:
           FUSE_APKS: ${{ inputs.fuse_apks }}
         run: |
           set -euo pipefail
+          # --base-iso, not --gh: the ISO is the authority.  A loose tree can
+          # carry leftovers from earlier local runs, and those do not belong
+          # in a release image.
           args=(
-            --gh /tmp/isoroot
-            --system /tmp/isoroot/system.sfs
+            --base-iso /tmp/base.iso
             --kernel-dir /tmp/kdir
             --out /tmp/build
             --name "DarkMatter-NetHunter-KSU-6.12-amd64.iso"

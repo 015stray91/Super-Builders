@@ -30,11 +30,17 @@ set -euo pipefail
 # with --system.
 #
 # Usage:
-#   ./fuse_darkmatter_nh.sh --gh DIR --system system.sfs --kernel-dir DIR \
+#   ./fuse_darkmatter_nh.sh --base-iso DarkMatter.iso --kernel-dir DIR \
 #                           --kalifs kali-amd64.tar.xz [--out DIR]
+#
+#   --base-iso  the original DarkMatter ISO (preferred: it is the authority,
+#               and a local working tree may hold leftovers from earlier runs)
+#   --gh        a loose copy of the ISO tree, used only if no --base-iso is
+#               given; extracted/ working files in it are skipped
 # ==============================================================================
 
 GH_DIR=""
+BASE_ISO=""
 SYSTEM_IMG=""
 KERNEL_DIR=""
 KALIFS=""
@@ -51,6 +57,7 @@ note() { printf '\n==> %s\n' "$*"; }
 while [ $# -gt 0 ]; do
     case "$1" in
         --gh)         GH_DIR="$2"; shift 2 ;;
+        --base-iso)   BASE_ISO="$2"; shift 2 ;;
         --system)     SYSTEM_IMG="$2"; shift 2 ;;
         --kernel-dir) KERNEL_DIR="$2"; shift 2 ;;
         --kalifs)     KALIFS="$2"; shift 2 ;;
@@ -65,10 +72,18 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-[ -n "$GH_DIR" ] || die "--gh is required (the gh/ tree)"
-[ -d "$GH_DIR" ] || die "not a directory: $GH_DIR"
-GH_DIR="$(cd "$GH_DIR" && pwd)"
+[ -n "$GH_DIR" ] || [ -n "$BASE_ISO" ] \
+    || die "give --base-iso <DarkMatter.iso> (preferred) or --gh <tree>"
+[ -n "$GH_DIR" ] && { [ -d "$GH_DIR" ] || die "not a directory: $GH_DIR"; }
+[ -n "$BASE_ISO" ] && { [ -f "$BASE_ISO" ] || die "no such ISO: $BASE_ISO"; }
 mkdir -p "$OUT_DIR"; OUT_DIR="$(cd "$OUT_DIR" && pwd)"
+
+# A --gh directory is a scratch tree: it may carry leftovers from earlier runs
+# (unpacked initrds, extracted ramdisks, a stale kernel).  The ISO is the
+# authority, so prefer --base-iso when both are given.
+if [ -n "$BASE_ISO" ]; then
+    BASE_ISO="$(cd "$(dirname "$BASE_ISO")" && pwd)/$(basename "$BASE_ISO")"
+fi
 
 [ -n "$SYSTEM_IMG" ] && [ -e "$SYSTEM_IMG" ] && SYSTEM_IMG="$(cd "$(dirname "$SYSTEM_IMG")" && pwd)/$(basename "$SYSTEM_IMG")"
 [ -n "$KERNEL_DIR" ] && [ -d "$KERNEL_DIR" ] && KERNEL_DIR="$(cd "$KERNEL_DIR" && pwd)"
@@ -117,9 +132,15 @@ echo "  ok"
 # Running out here means a multi-minute unpack dies at the end, so check first.
 # ------------------------------------------------------------------------------
 note "Checking free space on $OUT_DIR"
-gh_sz=$(du -sb --exclude='initrd_extracted' --exclude='ramdisk_extracted' \
-               --exclude='darkmatter_blueprints' --exclude='*.raw' \
-               "$GH_DIR" 2>/dev/null | cut -f1)
+if [ -n "$GH_DIR" ]; then
+    gh_sz=$(du -sb --exclude='initrd_extracted' --exclude='ramdisk_extracted' \
+                   --exclude='darkmatter_blueprints' --exclude='*.raw' \
+                   "$GH_DIR" 2>/dev/null | cut -f1)
+else
+    # Reading the ISO: the extracted tree is about the size of the ISO itself,
+    # and it lands in OUT_DIR, so count it.
+    gh_sz=$(stat -c %s "$BASE_ISO")
+fi
 sys_sz=0; sys_unpacked=0; sys_phrase=""
 if [ -n "$SYSTEM_IMG" ] && [ "$NO_FUSE" -eq 0 ]; then
     if [ -f "$SYSTEM_IMG" ]; then
@@ -163,15 +184,31 @@ fi
 # 1. Copy the gh/ boot tree into the ISO staging area
 # ------------------------------------------------------------------------------
 note "Staging the DarkMatter boot tree"
-# Extracted/working copies of the boot images are not part of the ISO.
-rsync -a \
-    --exclude 'initrd_extracted/' \
-    --exclude 'ramdisk_extracted/' \
-    --exclude 'darkmatter_blueprints/' \
-    --exclude 'nh-unpacked/' \
-    --exclude '*.raw' \
-    "$GH_DIR/" "$ISO_ROOT/"
-echo "  copied from $GH_DIR"
+if [ -n "$BASE_ISO" ]; then
+    # xorriso reads the ISO9660 tree directly -- no loop mount, no root.
+    command -v xorriso >/dev/null || die "xorriso is required to read --base-iso"
+    xorriso -osirrox on -indev "$BASE_ISO" -extract / "$ISO_ROOT" 2>/dev/null
+    chmod -R u+w "$ISO_ROOT"
+    echo "  extracted from $(basename "$BASE_ISO")"
+    echo "  (the ISO is the authority: no leftover working files are carried in)"
+elif [ -n "$GH_DIR" ]; then
+    # A --gh tree is a scratch area and may hold leftovers from earlier runs
+    # (unpacked initrds, extracted ramdisks, a previous kernel).  None of that
+    # belongs in the ISO.
+    rsync -a \
+        --exclude 'initrd_extracted/' \
+        --exclude 'ramdisk_extracted/' \
+        --exclude 'darkmatter_blueprints/' \
+        --exclude 'nh-unpacked/' \
+        --exclude '*.raw' \
+        "$GH_DIR/" "$ISO_ROOT/"
+    echo "  copied from $GH_DIR"
+fi
+
+# Everything below reads the *staged* tree, not the source.  That way a
+# --base-iso run and a --gh run follow exactly the same path, and nothing is
+# read from a scratch directory once staging is done.
+TREE="$ISO_ROOT"
 
 [ -d "$ISO_ROOT/isolinux" ] && echo "  isolinux/: $(ls "$ISO_ROOT/isolinux" | wc -l) files"
 [ -d "$ISO_ROOT/efi/boot" ] && echo "  efi/boot/: $(ls "$ISO_ROOT/efi/boot" | wc -l) files"
@@ -191,9 +228,19 @@ else
 fi
 
 # The android-x86 boot chain reads <root>/initrd.img next to the kernel.
-for cand in "$GH_DIR/initrd.img" "$KERNEL_DIR/initrd.img" "$KERNEL_DIR/../initrd.img"; do
-    [ -n "$cand" ] && [ -f "$cand" ] && { cp -f "$cand" "$ISO_ROOT/initrd.img"; echo "  initrd.img <- $cand"; break; }
-done
+# The staged tree already has the ISO's own initrd, which is the one that
+# matches this boot layout -- keep it.  Only copy one in if the tree has none.
+if [ -f "$ISO_ROOT/initrd.img" ]; then
+    echo "  initrd.img kept from the base ISO ($(stat -c %s "$ISO_ROOT/initrd.img") bytes)"
+else
+    for cand in "$KERNEL_DIR/initrd.img" "$KERNEL_DIR/../initrd.img"; do
+        [ -n "$cand" ] && [ -f "$cand" ] && {
+            cp -f "$cand" "$ISO_ROOT/initrd.img"
+            echo "  initrd.img <- $cand"
+            break
+        }
+    done
+fi
 [ -f "$ISO_ROOT/initrd.img" ] || echo "  warning: no initrd.img -- the ISO will not boot"
 
 if [ -f "$ISO_ROOT/install.img" ]; then
@@ -220,6 +267,12 @@ fi
 # ------------------------------------------------------------------------------
 # 4. System image + NetHunter fuse
 # ------------------------------------------------------------------------------
+# The staged tree already has the system image where the ISO put it.
+if [ -z "$SYSTEM_IMG" ] && [ -f "$TREE/system.sfs" ]; then
+    SYSTEM_IMG="$TREE/system.sfs"
+    echo "  using the system image from the staged tree: system.sfs"
+fi
+
 if [ "$NO_FUSE" -eq 1 ]; then
     note "Skipping system fuse (--no-fuse)"
 elif [ -z "$SYSTEM_IMG" ]; then
@@ -337,7 +390,8 @@ else
     fi
 
     # --- NetHunter payload: nh-unpacked is a Magisk module ---
-    NH="$GH_DIR/nh-unpacked"
+    NH="$TREE/nh-unpacked"
+    [ -d "$NH" ] || NH="$GH_DIR/nh-unpacked"
     if [ -d "$NH" ]; then
         if [ -d "$NH/system" ]; then
             sudo rsync -a "$NH/system/" "$SYS/"
@@ -356,7 +410,13 @@ else
     fi
 
     # --- APKs ---
-    APK_SRC="${NH_APK_SRC:-$GH_DIR/apk}"
+    if [ -n "$NH_APK_SRC" ]; then
+        APK_SRC="$NH_APK_SRC"
+    elif [ -d "$TREE/apk" ]; then
+        APK_SRC="$TREE/apk"
+    else
+        APK_SRC="$GH_DIR/apk"
+    fi
     if [ -d "$APK_SRC" ]; then
         shopt -s nullglob
         n=0
@@ -374,7 +434,7 @@ else
 
     # --- Kali rootfs ---
     if [ -z "$KALIFS" ]; then
-        for cand in "$GH_DIR"/nh-unpacked/rootfs/kali-amd64.tar.* "$GH_DIR"/rootfs/kali-amd64.tar.*; do
+        for cand in "$TREE"/nh-unpacked/rootfs/kali-amd64.tar.* "$GH_DIR"/nh-unpacked/rootfs/kali-amd64.tar.* "$GH_DIR"/rootfs/kali-amd64.tar.*; do
             [ -f "$cand" ] && { KALIFS="$cand"; break; }
         done
     fi
