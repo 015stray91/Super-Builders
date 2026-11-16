@@ -2,158 +2,315 @@
 set -euo pipefail
 
 # ==============================================================================
-# Dark Matter + Kali NetHunter (amd64) + KernelSU-Next ISO Fuser
-# Tailored to /media/slm015/ff289034-a99e-44cf-990f-1912c7a0fe05/nethunter-dark-matter_build
+# DarkMatter + NetHunter Pro (amd64) + KernelSU-Next  --  install image fuser
+#
+# Takes the DarkMatter Android-x86 base and the NetHunter payloads, merges the
+# Kali rootfs into the Android system image, and emits:
+#
+#   <out>/iso/            bootable ISO tree (kernel, initrd.img, system.sfs, ...)
+#   <out>/install.img     installer ramdisk (optional, enables the Install menu)
+#   <out>/DarkMatter-NetHunter-KSU-amd64.iso
+#
+# Unlike the first version this script does NOT build the kernel: it consumes
+# the artifact the CI build already produced (vmlinuz + modules).  Building
+# here as well meant the fused image could ship a kernel that never went through
+# the pinned SUSFS/ZeroMount patch set.
+#
+# Usage:
+#   ./fuse_darkmatter_nh.sh --base DIR --nh DIR --kernel-dir DIR [options]
+#
+#   --base DIR        unpacked DarkMatter ISO tree (contains squashfs-root/)
+#   --nh DIR          unpacked NetHunter installer (contains system/, data/app)
+#   --kernel-dir DIR  CI artifact dir: vmlinuz + modules/lib/modules/...
+#   --kalifs FILE     Kali rootfs tarball; defaults to <nh>/rootfs/kali-amd64.tar.*
+#                     or a kali-amd64/ directory under <nh>/rootfs
+#   --out DIR         output directory (default: ./out)
+#   --no-iso          stage the tree but skip the xorriso step
+#   --keep-work       do not delete the work directory
+#
+# Everything is parameterised: the old script hardcoded a path under
+# /media/<user>/<uuid>/, so it only ever ran on one machine.
 # ==============================================================================
 
-BASE_DIR="/media/slm015/ff289034-a99e-44cf-990f-1912c7a0fe05/nethunter-dark-matter_build"
-DM_DIR="${BASE_DIR}/nethunter-darkmatter_iso/dark-matter_base"
-NH_DIR="${BASE_DIR}/nethunter-darkmatter_iso/nh-unpacked"
+BASE_DIR=""
+NH_DIR=""
+KERNEL_DIR=""
+KALIFS=""
+OUT_DIR="$PWD/out"
+MAKE_ISO=1
+KEEP_WORK=0
 
-KERNEL_SRC="${BASE_DIR}/kernel_src" # Optional: path to your x86_64 kernel source
-OUT_ISO="${BASE_DIR}/DarkMatter-NetHunter-KSU-amd64.iso"
+die() { echo "error: $*" >&2; exit 1; }
+note() { printf '\n==> %s\n' "$*"; }
 
-WORK_DIR="${BASE_DIR}/work_fuse"
-MOD_OUT="${WORK_DIR}/modules_out"
-MNT_SYS="${WORK_DIR}/mnt_sys"
-SYS_IMG="${DM_DIR}/squashfs-root/system.img"
-
-mkdir -p "$WORK_DIR" "$MOD_OUT" "$MNT_SYS"
-
-echo "[1/5] Checking dependencies..."
-for cmd in make gcc xorriso mksquashfs tar curl; do
-    if ! command -v "$cmd" &>/dev/null; then
-        echo "Missing required tool: $cmd"
-        echo "Install: sudo apt-get install -y build-essential bc bison flex libssl-dev libelf-dev xorriso squashfs-tools curl"
-        exit 1
-    fi
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --base)       BASE_DIR="$2"; shift 2 ;;
+        --nh)         NH_DIR="$2"; shift 2 ;;
+        --kernel-dir) KERNEL_DIR="$2"; shift 2 ;;
+        --kalifs)     KALIFS="$2"; shift 2 ;;
+        --out)        OUT_DIR="$2"; shift 2 ;;
+        --no-iso)     MAKE_ISO=0; shift ;;
+        --keep-work)  KEEP_WORK=1; shift ;;
+        -h|--help)    sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *)            die "unknown argument: $1" ;;
+    esac
 done
 
-# ==============================================================================
-# 2. Build KSU-Next + NetHunter Kernel (x86_64)
-# ==============================================================================
-if [ -d "$KERNEL_SRC" ]; then
-    echo "[2/5] Patching & building kernel in $KERNEL_SRC..."
-    cd "$KERNEL_SRC"
+[ -n "$BASE_DIR" ] || die "--base is required"
+[ -d "$BASE_DIR" ] || die "base dir not found: $BASE_DIR"
 
-    if [ ! -d "KernelSU-Next" ] && [ ! -d "drivers/kernelsu" ]; then
-        curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next
+BASE_DIR="$(cd "$BASE_DIR" && pwd)"
+[ -n "$NH_DIR" ]     && NH_DIR="$(cd "$NH_DIR" 2>/dev/null && pwd || true)"
+[ -n "$KERNEL_DIR" ] && KERNEL_DIR="$(cd "$KERNEL_DIR" 2>/dev/null && pwd || true)"
+
+mkdir -p "$OUT_DIR"
+OUT_DIR="$(cd "$OUT_DIR" && pwd)"
+
+WORK="$OUT_DIR/work"
+ISO_ROOT="$OUT_DIR/iso"
+MODS_STAGE="$WORK/modules"
+MNT="$WORK/mnt"
+
+rm -rf "$WORK"
+mkdir -p "$MODS_STAGE" "$MNT" "$ISO_ROOT"
+
+cleanup() {
+    # Never leave a loop mount behind: a stale mount here makes the next run
+    # fail with a confusing "squashfs-root is busy".
+    if mountpoint -q "$MNT" 2>/dev/null; then
+        sudo umount "$MNT" || true
     fi
+    [ "$KEEP_WORK" -eq 1 ] || rm -rf "$WORK"
+}
+trap cleanup EXIT
 
-    # Optional: apply SUSFS / ZeroMount patches if present in BASE_DIR/patches/
-    if [ -d "${BASE_DIR}/patches" ]; then
-        for p in "${BASE_DIR}/patches"/*.patch; do
-            [ -e "$p" ] || continue
-            echo "Applying kernel patch: $p"
-            git apply "$p" || patch -p1 < "$p"
-        done
-    fi
-
-    if [ ! -f ".config" ]; then
-        if [ -f "${DM_DIR}/darkmatter_blueprints/ikconfig_darkmatter_readable.txt" ]; then
-            cp "${DM_DIR}/darkmatter_blueprints/ikconfig_darkmatter_readable.txt" .config
-        elif [ -f "${NH_DIR}/kernel_blueprints/config-pro" ]; then
-            cp "${NH_DIR}/kernel_blueprints/config-pro" .config
-        elif [ -f "arch/x86/configs/darkmatter_defconfig" ]; then
-            make ARCH=x86_64 darkmatter_defconfig
-        else
-            make ARCH=x86_64 x86_64_defconfig
-        fi
-    fi
-
-    ./scripts/config --enable CONFIG_KSU \
-                     --enable CONFIG_KSU_SUSFS \
-                     --enable CONFIG_KPROBES \
-                     --enable CONFIG_HAVE_KPROBES \
-                     --enable CONFIG_KPROBE_EVENTS \
-                     --enable CONFIG_MAC80211 \
-                     --enable CONFIG_CFG80211_WEXT \
-                     --enable CONFIG_USB_HID \
-                     --enable CONFIG_HID_GENERIC \
-                     --enable CONFIG_USB_GADGET \
-                     --enable CONFIG_USB_CONFIGFS \
-                     --enable CONFIG_USB_CONFIGFS_F_HID \
-                     --enable CONFIG_BRIDGE \
-                     --enable CONFIG_TUN
-
-    make ARCH=x86_64 olddefconfig
-    make ARCH=x86_64 -j"$(nproc)" bzImage modules
-    make ARCH=x86_64 INSTALL_MOD_PATH="$MOD_OUT" modules_install
-
-    cp -v arch/x86/boot/bzImage "${DM_DIR}/kernel"
-else
-    echo "[2/5] Skipping kernel build ($KERNEL_SRC not found). Using existing ${DM_DIR}/kernel."
+# ------------------------------------------------------------------------------
+# 0. Dependencies
+# ------------------------------------------------------------------------------
+note "Checking dependencies"
+missing=0
+for cmd in mksquashfs unsquashfs rsync tar gzip; do
+    command -v "$cmd" >/dev/null 2>&1 || { echo "  missing: $cmd"; missing=1; }
+done
+if [ "$MAKE_ISO" -eq 1 ]; then
+    command -v xorriso >/dev/null 2>&1 || { echo "  missing: xorriso"; missing=1; }
 fi
-
-# ==============================================================================
-# 3. Mount dark-matter_base/squashfs-root/system.img
-# ==============================================================================
-echo "[3/5] Mounting $SYS_IMG..."
-if [ ! -f "$SYS_IMG" ]; then
-    echo "Error: $SYS_IMG not found!"
-    exit 1
+if [ "$missing" -ne 0 ]; then
+    die "install them: sudo apt-get install -y squashfs-tools xorriso rsync"
 fi
+echo "  ok"
 
-sudo mount -o loop "$SYS_IMG" "$MNT_SYS"
-trap 'sudo umount "$MNT_SYS" 2>/dev/null || true' EXIT
+# ------------------------------------------------------------------------------
+# 1. Locate the DarkMatter system image
+# ------------------------------------------------------------------------------
+note "Locating the DarkMatter system image"
 
-# ==============================================================================
-# 4. Fuse NetHunter system files, APKs, rootfs & kernel modules
-# ==============================================================================
-echo "[4/5] Fusing NetHunter amd64 into Dark Matter system.img..."
+# Android-x86 bases ship either an uncompressed squashfs-root/ tree or a
+# system.sfs that has to be unpacked first.  Support both.
+SYS_SFS=""
+SQUASH_ROOT=""
+for cand in "$BASE_DIR/system.sfs" "$BASE_DIR/system.img.sfs"; do
+    [ -f "$cand" ] && { SYS_SFS="$cand"; break; }
+done
+for cand in "$BASE_DIR/squashfs-root" "$BASE_DIR/root"; do
+    [ -d "$cand" ] && { SQUASH_ROOT="$cand"; break; }
+done
 
-# Merge kernel modules if built
-if [ -d "${MOD_OUT}/lib/modules" ]; then
-    sudo mkdir -p "${MNT_SYS}/system/lib/modules"
-    sudo cp -r "${MOD_OUT}/lib/modules/"* "${MNT_SYS}/system/lib/modules/"
+if [ -z "$SQUASH_ROOT" ]; then
+    [ -n "$SYS_SFS" ] || die "no system.sfs or squashfs-root/ under $BASE_DIR"
+    SQUASH_ROOT="$WORK/squashfs-root"
+    note "Unpacking $(basename "$SYS_SFS")"
+    sudo unsquashfs -d "$SQUASH_ROOT" "$SYS_SFS" >/dev/null
 fi
+echo "  system tree: $SQUASH_ROOT"
 
-# Merge nh-unpacked/system (bin, etc, addon.d, media)
-if [ -d "${NH_DIR}/system" ]; then
-    sudo cp -rn "${NH_DIR}/system/"* "${MNT_SYS}/system/" || true
-fi
+# The Android system image is either a directory (system/) or a mounted img.
+SYSTEM_PATH=""
+for cand in "$SQUASH_ROOT/system" "$SQUASH_ROOT/system.img"; do
+    [ -e "$cand" ] && { SYSTEM_PATH="$cand"; break; }
+done
+[ -n "$SYSTEM_PATH" ] || die "no system/ or system.img inside $SQUASH_ROOT"
 
-# Install NetHunter APKs from nh-unpacked/data/app into system/priv-app
-if [ -d "${NH_DIR}/data/app" ]; then
-    for apk in "${NH_DIR}/data/app"/*.apk; do
-        [ -e "$apk" ] || continue
-        name="$(basename "$apk" .apk)"
-        sudo mkdir -p "${MNT_SYS}/system/priv-app/${name}"
-        sudo cp -v "$apk" "${MNT_SYS}/system/priv-app/${name}/${name}.apk"
-        sudo chmod 0755 "${MNT_SYS}/system/priv-app/${name}"
-        sudo chmod 0644 "${MNT_SYS}/system/priv-app/${name}/${name}.apk"
+# ------------------------------------------------------------------------------
+# 2. Kernel + modules (from the CI artifact -- never rebuilt here)
+# ------------------------------------------------------------------------------
+note "Installing kernel and modules"
+if [ -n "$KERNEL_DIR" ]; then
+    [ -f "$KERNEL_DIR/vmlinuz" ] || die "no vmlinuz in $KERNEL_DIR"
+    cp -v "$KERNEL_DIR/vmlinuz" "$ISO_ROOT/kernel"
+
+    # Modules may be a full tree (modules/lib/modules/<ver>) or bare modules/.
+    src=""
+    for cand in "$KERNEL_DIR/modules/lib/modules" "$KERNEL_DIR/lib/modules"; do
+        [ -d "$cand" ] && { src="$cand"; break; }
     done
+    if [ -n "$src" ]; then
+        cp -a "$src/." "$MODS_STAGE/"
+        echo "  modules: $(find "$MODS_STAGE" -name '*.ko' | wc -l) .ko files"
+    else
+        echo "  warning: no modules/ in $KERNEL_DIR -- wireless/HID modules will be missing"
+    fi
+else
+    for cand in "$BASE_DIR/kernel" "$BASE_DIR/vmlinuz"; do
+        [ -f "$cand" ] && { cp -v "$cand" "$ISO_ROOT/kernel"; break; }
+    done
+    [ -f "$ISO_ROOT/kernel" ] || die "no kernel supplied and none in $BASE_DIR"
+    echo "  warning: no --kernel-dir given; reusing the base kernel"
 fi
 
-# Pack kali-amd64 rootfs & add first-boot init script
-if [ -d "${NH_DIR}/rootfs/kali-amd64" ]; then
-    echo "Archiving kali-amd64 rootfs for first-boot extraction..."
-    sudo mkdir -p "${MNT_SYS}/system/etc/nethunter"
-    sudo tar -czf "${MNT_SYS}/system/etc/nethunter/kalifs-amd64.tar.gz" -C "${NH_DIR}/rootfs" kali-amd64
+# initrd: the NetHunter Pro payload if present, else the base one.
+for cand in "$NH_DIR/initrd.img" "$BASE_DIR/initrd.img"; do
+    [ -n "$cand" ] && [ -f "$cand" ] && { cp -v "$cand" "$ISO_ROOT/initrd.img"; break; }
+done
 
-    sudo tee "${MNT_SYS}/system/etc/init/nethunter.rc" >/dev/null << 'EOF'
+# ------------------------------------------------------------------------------
+# 3. Merge the NetHunter system files
+# ------------------------------------------------------------------------------
+note "Merging NetHunter system files"
+if [ -z "$NH_DIR" ]; then
+    echo "  warning: no --nh given; skipping the NetHunter system merge"
+else
+    [ -d "$NH_DIR" ] || die "NetHunter dir not found"
+
+    if mountpoint -q "$MNT" 2>/dev/null; then sudo umount "$MNT"; fi
+    sudo mount -o loop "$SYSTEM_PATH" "$MNT" 2>/dev/null || {
+        # A directory-shaped system/ is rsynced directly.
+        [ -d "$SYSTEM_PATH" ] || die "cannot mount $SYSTEM_PATH"
+    }
+
+    if mountpoint -q "$MNT" 2>/dev/null; then
+        TARGET="$MNT/system"
+        mkdir -p "$TARGET"
+    else
+        TARGET="$SYSTEM_PATH"
+    fi
+
+    # rsync, not `cp -rn`: cp skips anything that already exists, which silently
+    # drops NetHunter binaries that share a name with an Android one.  rsync
+    # updates them in place.
+    if [ -d "$NH_DIR/system" ]; then
+        sudo rsync -a "$NH_DIR/system/" "$TARGET/"
+        echo "  system/ merged"
+    fi
+
+    # NetHunter APKs -> priv-app
+    if [ -d "$NH_DIR/data/app" ]; then
+        shopt -s nullglob
+        for apk in "$NH_DIR/data/app"/*.apk; do
+            name="$(basename "$apk" .apk)"
+            sudo mkdir -p "$TARGET/priv-app/$name"
+            sudo cp -f "$apk" "$TARGET/priv-app/$name/$name.apk"
+            sudo chmod 0755 "$TARGET/priv-app/$name"
+            sudo chmod 0644 "$TARGET/priv-app/$name/$name.apk"
+        done
+        shopt -u nullglob
+        echo "  APKs staged into priv-app"
+    fi
+
+    # Kernel modules -> system/lib/modules
+    if [ -n "$(ls -A "$MODS_STAGE" 2>/dev/null)" ]; then
+        sudo mkdir -p "$TARGET/lib/modules"
+        sudo rsync -a "$MODS_STAGE/" "$TARGET/lib/modules/"
+        echo "  modules merged"
+    fi
+
+    if mountpoint -q "$MNT" 2>/dev/null; then
+        sudo umount "$MNT"
+    fi
+fi
+
+# ------------------------------------------------------------------------------
+# 4. Kali rootfs -> first-boot extraction
+# ------------------------------------------------------------------------------
+note "Staging the Kali rootfs"
+[ -z "$KALIFS" ] && [ -n "$NH_DIR" ] && {
+    for cand in "$NH_DIR"/rootfs/kali-amd64.tar.gz "$NH_DIR"/rootfs/kali-amd64.tar.xz; do
+        [ -f "$cand" ] && { KALIFS="$cand"; break; }
+    done
+}
+
+NH_ETC="$SQUASH_ROOT/system/etc/nethunter"
+if [ -n "$KALIFS" ] && [ -f "$KALIFS" ]; then
+    sudo mkdir -p "$NH_ETC"
+    sudo cp -f "$KALIFS" "$NH_ETC/kalifs-amd64.tar.gz"
+    echo "  rootfs -> /system/etc/nethunter/kalifs-amd64.tar.gz"
+elif [ -n "$NH_DIR" ] && [ -d "$NH_DIR/rootfs/kali-amd64" ]; then
+    sudo mkdir -p "$NH_ETC"
+    sudo tar -czf "$NH_ETC/kalifs-amd64.tar.gz" -C "$NH_DIR/rootfs" kali-amd64
+    echo "  rootfs archived from $NH_DIR/rootfs/kali-amd64"
+else
+    echo "  warning: no Kali rootfs found; the chroot will be empty on first boot"
+fi
+
+if [ -f "$NH_ETC/kalifs-amd64.tar.gz" ]; then
+    # Extract on first boot only, and only if it is not already there.
+    sudo mkdir -p "$SQUASH_ROOT/system/etc/init"
+    sudo tee "$SQUASH_ROOT/system/etc/init/nethunter.rc" >/dev/null <<'EOF'
 on property:sys.boot_completed=1
     exec - root root -- /system/bin/sh -c "if [ ! -d /data/local/nhsystem/kali-amd64 ] && [ -f /system/etc/nethunter/kalifs-amd64.tar.gz ]; then mkdir -p /data/local/nhsystem && tar -xzf /system/etc/nethunter/kalifs-amd64.tar.gz -C /data/local/nhsystem/; fi"
 EOF
-    sudo chmod 0644 "${MNT_SYS}/system/etc/init/nethunter.rc"
+    sudo chmod 0644 "$SQUASH_ROOT/system/etc/init/nethunter.rc"
 fi
 
-sudo umount "$MNT_SYS"
-trap - EXIT
+# ------------------------------------------------------------------------------
+# 5. Repack system.sfs
+# ------------------------------------------------------------------------------
+note "Repacking system.sfs"
+cp -f "$SQUASH_ROOT/system/../kernel" "$ISO_ROOT/kernel" 2>/dev/null || true
+rm -f "$ISO_ROOT/system.sfs"
+sudo mksquashfs "$SQUASH_ROOT" "$ISO_ROOT/system.sfs" -comp xz -b 1M -noappend >/dev/null
+sudo chown "$(id -u):$(id -g)" "$ISO_ROOT/system.sfs"
+echo "  $(du -h "$ISO_ROOT/system.sfs" | cut -f1) system.sfs"
 
-# Repack system.sfs
-echo "Repacking dark-matter_base/system.sfs (this may take a few minutes)..."
-rm -f "${DM_DIR}/system.sfs"
-mksquashfs "${DM_DIR}/squashfs-root" "${DM_DIR}/system.sfs" -comp xz -b 1M
+# ------------------------------------------------------------------------------
+# 6. Boot files
+# ------------------------------------------------------------------------------
+note "Copying boot loaders"
+for d in efi boot isolinux; do
+    [ -d "$BASE_DIR/$d" ] && cp -a "$BASE_DIR/$d" "$ISO_ROOT/"
+done
+# android-x86 keeps isolinux.bin at the ISO root, not in isolinux/
+for f in isolinux.bin boot.cat; do
+    [ -f "$BASE_DIR/$f" ] && cp -a "$BASE_DIR/$f" "$ISO_ROOT/"
+done
+[ -d "$ISO_ROOT/efi" ] || die "no efi/ in $BASE_DIR -- the ISO would not be UEFI-bootable"
 
-# ==============================================================================
-# 5. Build Bootable ISO
-# ==============================================================================
-echo "[5/5] Building final ISO: $OUT_ISO..."
-xorriso -as mkisofs -r -V "DARKMATTER_NH_KSU" \
-    -b isolinux/isolinux.bin -c isolinux/boot.cat \
-    -no-emul-boot -boot-load-size 4 -boot-info-table \
-    -eltorito-alt-boot -e boot/grub/efi.img -no-emul-boot \
-    -o "$OUT_ISO" "$DM_DIR"
+# ------------------------------------------------------------------------------
+# 7. ISO
+# ------------------------------------------------------------------------------
+if [ "$MAKE_ISO" -eq 1 ]; then
+    note "Building the ISO"
+    OUT_ISO="$OUT_DIR/DarkMatter-NetHunter-KSU-amd64.iso"
+    rm -f "$OUT_ISO"
 
-echo "Done! Your fused ISO is ready at: $OUT_ISO"
+    # A zero-length or missing boot image makes xorriso emit an ISO that
+    # silently will not boot, so check before building rather than after.
+    BOOT_BIOS=""
+    BOOT_EFI=""
+    [ -s "$ISO_ROOT/isolinux.bin" ] && BOOT_BIOS=1
+    [ -s "$ISO_ROOT/boot/grub/efi.img" ] && BOOT_EFI=1
+    if [ -z "$BOOT_BIOS" ] && [ -z "$BOOT_EFI" ]; then
+        die "no usable boot image (isolinux.bin / boot/grub/efi.img) in $ISO_ROOT"
+    fi
+    [ -z "$BOOT_BIOS" ] && echo "  warning: no isolinux.bin -- BIOS/CSM boot will not work"
+    [ -z "$BOOT_EFI" ]  && echo "  warning: no boot/grub/efi.img -- UEFI boot will not work"
+
+    xorriso_args=(-as mkisofs -r -V "DARKMATTER_NH_KSU" -o "$OUT_ISO")
+    if [ -n "$BOOT_BIOS" ]; then
+        xorriso_args+=(-b isolinux.bin -c boot.cat
+                       -no-emul-boot -boot-load-size 4 -boot-info-table)
+    fi
+    if [ -n "$BOOT_EFI" ]; then
+        xorriso_args+=(-eltorito-alt-boot -e boot/grub/efi.img -no-emul-boot)
+    fi
+
+    xorriso "${xorriso_args[@]}" "$ISO_ROOT"
+    echo
+    echo "ISO: $OUT_ISO ($(du -h "$OUT_ISO" | cut -f1))"
+    echo "sha256: $(sha256sum "$OUT_ISO" | cut -d' ' -f1)"
+    echo "boot: $([ -n "$BOOT_BIOS" ] && echo BIOS) $([ -n "$BOOT_EFI" ] && echo UEFI)"
+else
+    note "Staged tree (no ISO requested)"
+    find "$ISO_ROOT" -maxdepth 1 -type f -printf '  %10s  %f\n' | sort -k2
+fi
