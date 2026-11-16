@@ -101,6 +101,61 @@ for c in $need; do command -v "$c" >/dev/null 2>&1 || missing="$missing $c"; don
 echo "  ok"
 
 # ------------------------------------------------------------------------------
+# 0b. Free space
+#
+# Peak usage, all under --out:
+#   gh tree copy      ~ the size of gh/ (minus the extracted dirs we skip)
+#   unpacked sysroot  ~2-3x the system image, because squashfs-xz has already
+#                       removed the redundancy, so it expands rather than shrinks
+#   repacked sfs      ~ the size of the system image again
+#   final ISO         ~ tree + sfs, written while the staging tree still exists
+#
+# Running out here means a multi-minute unpack dies at the end, so check first.
+# ------------------------------------------------------------------------------
+note "Checking free space on $OUT_DIR"
+gh_sz=$(du -sb --exclude='initrd_extracted' --exclude='ramdisk_extracted' \
+               --exclude='darkmatter_blueprints' --exclude='*.raw' \
+               "$GH_DIR" 2>/dev/null | cut -f1)
+sys_sz=0; sys_unpacked=0; sys_phrase=""
+if [ -n "$SYSTEM_IMG" ] && [ "$NO_FUSE" -eq 0 ]; then
+    if [ -f "$SYSTEM_IMG" ]; then
+        sys_sz=$(stat -c %s "$SYSTEM_IMG")
+        sys_unpacked=$(( sys_sz * 2 ))
+        sys_phrase="the image unpacks to ~$(numfmt --to=iec $((sys_sz * 2)))-$(numfmt --to=iec $((sys_sz * 3))) and is repacked again"
+    elif [ -d "$SYSTEM_IMG" ]; then
+        sys_unpacked=$(du -sb "$SYSTEM_IMG" 2>/dev/null | cut -f1)
+        sys_sz=$sys_unpacked
+        sys_phrase="already unpacked, so it is only copied and repacked"
+    fi
+fi
+# gh copy + sysroot in place + repacked sfs + the final ISO.
+need=$(( gh_sz + sys_unpacked + sys_unpacked / 3 + gh_sz / 10 ))
+avail=$(df -B1 --output=avail "$OUT_DIR" | tail -1 | tr -d ' ')
+echo "  boot tree:   $(numfmt --to=iec "$gh_sz")"
+if [ "$sys_unpacked" -gt 0 ]; then
+    echo "  system:      $(numfmt --to=iec "$sys_sz") -- $sys_phrase"
+fi
+echo "  estimated:   $(numfmt --to=iec "$need")"
+echo "  available:   $(numfmt --to=iec "$avail")"
+if [ "$avail" -lt "$need" ]; then
+    cat >&2 <<EOF
+
+error: not enough free space in $OUT_DIR
+       Need about $(numfmt --to=iec "$need"), have $(numfmt --to=iec "$avail").
+       This is an estimate for a build with the system image fused in.
+
+       Free space, or put the working area on another disk:
+
+         ./fuse_darkmatter_nh.sh ... --out /path/on/bigger/disk
+
+       To fuse *without* the system image (useful for a quick boot test):
+
+         ./fuse_darkmatter_nh.sh ... --no-fuse
+EOF
+    exit 1
+fi
+
+# ------------------------------------------------------------------------------
 # 1. Copy the gh/ boot tree into the ISO staging area
 # ------------------------------------------------------------------------------
 note "Staging the DarkMatter boot tree"
