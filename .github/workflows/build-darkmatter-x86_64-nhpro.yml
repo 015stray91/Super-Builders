@@ -112,6 +112,16 @@ jobs:
           cd /tmp/kernel
           git fetch -q --depth 1 origin "${{ steps.pins.outputs.kernel_branch }}"
           git checkout -q "${{ steps.pins.outputs.kernel_pin }}"
+
+          # The cache stores /tmp/kernel *after* the patches were applied, so a
+          # restored tree is already patched.  Re-applying then fails with
+          # "Reversed (or previously applied) patch detected" and the build
+          # dies in the patch step.  Reset to the pin and drop untracked files
+          # (fs/susfs.c, include/linux/susfs*.h, ...) so every run starts from
+          # exactly the pinned commit.
+          git reset --hard -q
+          git clean -fdxq
+
           test -f arch/x86/entry/common.c
           # the pin must carry the indirect-syscall hardening KernelSU requires
           grep -q X86_FEATURE_INDIRECT_SAFE arch/x86/include/asm/cpufeatures.h \
