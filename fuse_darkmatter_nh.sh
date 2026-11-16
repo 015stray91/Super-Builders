@@ -380,12 +380,22 @@ else
     fi
     if [ -n "$KALIFS" ] && [ -f "$KALIFS" ]; then
         sudo mkdir -p "$SYS/etc/nethunter"
-        sudo cp -f "$KALIFS" "$SYS/etc/nethunter/kalifs-amd64.tar.gz"
-        echo "  rootfs <- $(basename "$KALIFS") ($(du -h "$KALIFS" | cut -f1))"
+        # Keep the real extension: the Kali rootfs is .tar.xz, and naming it
+        # .tar.gz then extracting with `tar -zxf` fails on the first block.
+        case "$KALIFS" in
+            *.tar.xz|*.txz)   KALI_NAME=kalifs-amd64.tar.xz ;;
+            *.tar.gz|*.tgz)   KALI_NAME=kalifs-amd64.tar.gz ;;
+            *.tar.zst)        KALI_NAME=kalifs-amd64.tar.zst ;;
+            *.tar)            KALI_NAME=kalifs-amd64.tar ;;
+            *)                KALI_NAME="kalifs-amd64.$(basename "$KALIFS")" ;;
+        esac
+        sudo cp -f "$KALIFS" "$SYS/etc/nethunter/$KALI_NAME"
+        echo "  rootfs <- $(basename "$KALIFS") ($(du -h "$KALIFS" | cut -f1)) as $KALI_NAME"
     elif [ -d "$GH_DIR/nh-unpacked/rootfs/kali-amd64" ]; then
         sudo mkdir -p "$SYS/etc/nethunter"
         sudo tar -czf "$SYS/etc/nethunter/kalifs-amd64.tar.gz" \
              -C "$GH_DIR/nh-unpacked/rootfs" kali-amd64
+        KALI_NAME=kalifs-amd64.tar.gz
         echo "  rootfs archived from nh-unpacked/rootfs/kali-amd64"
     else
         echo "  warning: no Kali rootfs found (pass --kalifs)"
@@ -409,10 +419,22 @@ exec >>"$LOG" 2>&1
 echo "--- nethunter firstboot $(date)"
 
 if [ ! -d /data/local/nhsystem/kali-amd64 ]; then
-    if [ -f /system/etc/nethunter/kalifs-amd64.tar.gz ]; then
-        echo "extracting kali-amd64 rootfs"
-        tar -xzf /system/etc/nethunter/kalifs-amd64.tar.gz -C /data/local/nhsystem/
-    fi
+    for f in /system/etc/nethunter/kalifs-amd64.tar.*; do
+        [ -f "$f" ] || continue
+        echo "extracting $(basename "$f")"
+        # Android ships toybox tar, which handles gzip but not always xz, and
+        # the Kali rootfs is .tar.xz.  Try a direct extract first, then fall
+        # back to decompressing to a pipe.
+        if tar -xf "$f" -C /data/local/nhsystem/ 2>/dev/null; then
+            break
+        fi
+        case "$f" in
+            *.xz)  busybox xz -dc "$f" | tar -x -C /data/local/nhsystem/ && break ;;
+            *.gz)  busybox gzip -dc "$f" | tar -x -C /data/local/nhsystem/ && break ;;
+            *.zst) busybox zstd -dc "$f" | tar -x -C /data/local/nhsystem/ && break ;;
+        esac
+        echo "  could not extract $f"
+    done
 fi
 
 if [ -d /data/local/nhsystem/kali-amd64/etc ]; then

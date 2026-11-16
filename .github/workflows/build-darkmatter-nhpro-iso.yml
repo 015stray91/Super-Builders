@@ -1,0 +1,231 @@
+name: Build DarkMatter + NetHunter Pro install ISO
+
+# Takes the kernel produced by build-darkmatter-x86_64-nhpro.yml and fuses it
+# with the DarkMatter android-x86 base and the Kali NetHunter rootfs into a
+# single bootable install ISO.
+#
+# Inputs fetched here, not stored in the repo:
+#   - base ISO      archive.org dark-matter-exo-4.7 (1.27 GB)
+#   - Kali rootfs   kali.download nethunter-images (2.36 GB)
+#   - kernel        the darkmatter-nhpro-x86_64 artifact from the kernel build
+#
+# Everything else (the fuse logic, the config, the pins) comes from the repo,
+# so the image is reproducible from this workflow alone.
+#
+# Disk: the peak is roughly
+#   base ISO 1.3 + unpacked tree 1.1 + rootfs 2.4 + sysroot ~4 + new image ~4
+# which does not fit on a stock runner (14 GB free).  A free-disk step runs
+# first and the job fails loudly on low space rather than dying mid-repack.
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_run_id:
+        description: 'Run ID of the kernel build to take vmlinuz/modules from (blank = latest successful)'
+        type: string
+        required: false
+        default: ''
+      fuse_rootfs:
+        description: 'Fuse the Kali NetHunter rootfs into the image'
+        type: boolean
+        default: true
+      fuse_apks:
+        description: 'Install the NetHunter/NetHunterKeX APKs into /system/priv-app'
+        type: boolean
+        default: true
+  push:
+    branches: [015stray91]
+    paths:
+      - '.github/workflows/build-darkmatter-nhpro-iso.yml'
+      - 'fuse_darkmatter_nh.sh'
+      - 'unpack_system.sh'
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  BASE_ISO_ID: dark-matter-exo-4.7
+  BASE_ISO_FILE: DarkMatter_Exo4.7.iso
+  KALI_ROOTFS_URL: https://kali.download/nethunter-images/current/rootfs/kali-nethunter-rootfs-full-amd64.tar.xz
+
+jobs:
+  iso:
+    name: Fuse ISO (x86_64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+
+    steps:
+      # Stock runners have ~14 GB free; the peak here is well past that.
+      - name: Maximise build space
+        uses: easimon/maximize-build-space@v10
+        with:
+          root-reserve-mb: 2048
+          swap-size-mb: 2048
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
+
+      - name: Report disk
+        run: df -h /
+
+      - name: Checkout Super-Builders
+        uses: actions/checkout@v7
+        with:
+          path: sb
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            squashfs-tools xorriso rsync curl xz-utils e2fsprogs \
+            android-sdk-libsparse-utils cpio
+          for c in unsquashfs mksquashfs xorriso mke2fs debugfs simg2img; do
+            command -v "$c" >/dev/null || { echo "missing $c" >&2; exit 1; }
+          done
+
+      - name: Fetch the kernel build
+        id: kern
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ inputs.kernel_run_id }}
+        run: |
+          set -euo pipefail
+          if [ -z "$RUN_ID" ]; then
+            RUN_ID=$(gh api "repos/${{ github.repository }}/actions/workflows/build-darkmatter-x86_64-nhpro.yml/runs?status=success&per_page=1" \
+              --jq '.workflow_runs[0].id')
+            [ -n "$RUN_ID" ] && [ "$RUN_ID" != "null" ] \
+              || { echo "no successful kernel run found" >&2; exit 1; }
+          fi
+          echo "kernel run: $RUN_ID"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          mkdir -p /tmp/kern
+          gh run download "$RUN_ID" -R "${{ github.repository }}" \
+            -n darkmatter-nhpro-x86_64 -D /tmp/kern
+          find /tmp/kern -maxdepth 3 -name vmlinuz -o -maxdepth 3 -name System.map | head
+
+      - name: Normalise the kernel payload
+        run: |
+          set -euo pipefail
+          # The artifact nests things a couple of levels deep (boot/, out/).
+          V=$(find /tmp/kern -name vmlinuz -type f | head -1)
+          [ -n "$V" ] || { echo "no vmlinuz in artifact" >&2; exit 1; }
+          mkdir -p /tmp/kdir
+          cp "$V" /tmp/kdir/vmlinuz
+          M=$(find /tmp/kern -type d -path '*lib/modules/*' -name '6.12*' | head -1)
+          if [ -n "$M" ]; then
+            mkdir -p /tmp/kdir/modules/lib/modules
+            cp -a "$M" /tmp/kdir/modules/lib/modules/
+          else
+            echo "::warning::no 6.12 module tree in the artifact -- modules will not load"
+          fi
+          file /tmp/kdir/vmlinuz
+          echo "modules: $(find /tmp/kdir/modules -name '*.ko*' 2>/dev/null | wc -l)"
+          # Kernel config sanity: squashfs must be built in, or the image cannot
+          # be mounted at boot (this is the bug that made the first build boot
+          # to a black screen).
+          C=$(find /tmp/kern -name config -type f | head -1)
+          if [ -n "$C" ]; then
+            for o in CONFIG_SQUASHFS CONFIG_BLK_DEV_LOOP CONFIG_EXT4_FS; do
+              grep -q "^$o=y" "$C" || { echo "::error::$o is not =y in the built kernel"; exit 1; }
+            done
+            echo "kernel config: squashfs/loop/ext4 built in"
+          fi
+
+      - name: Fetch the DarkMatter base ISO
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 -o /tmp/base.iso \
+            "https://archive.org/download/${BASE_ISO_ID}/${BASE_ISO_FILE}"
+          ls -l /tmp/base.iso
+          file /tmp/base.iso | grep -q ISO || { echo "not an ISO image" >&2; exit 1; }
+
+      - name: Unpack the base ISO
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/isoroot
+          # xorriso extracts the ISO9660 tree; no loop mount, no root needed.
+          xorriso -osirrox on -indev /tmp/base.iso \
+            -extract / /tmp/isoroot 2>/dev/null
+          chmod -R u+w /tmp/isoroot
+          ls /tmp/isoroot
+          for f in isolinux/isolinux.bin boot/grub/efi.img findme; do
+            [ -e "/tmp/isoroot/$f" ] || { echo "base ISO missing $f" >&2; exit 1; }
+          done
+          rm -f /tmp/base.iso
+
+      - name: Fetch the Kali NetHunter rootfs
+        if: ${{ inputs.fuse_rootfs }}
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 -o /tmp/kali-rootfs.tar.xz "${KALI_ROOTFS_URL}"
+          ls -l /tmp/kali-rootfs.tar.xz
+          xz -t /tmp/kali-rootfs.tar.xz
+          echo "rootfs archive verified"
+
+      - name: Stage the NetHunter APKs
+        if: ${{ inputs.fuse_apks }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/apks
+          # The APK set is published with the base; take what is available and
+          # do not fail the build if one is missing.
+          base="https://archive.org/download/${BASE_ISO_ID}"
+          for a in NetHunter.apk NetHunterKeX.apk NetHunterTerminal.apk \
+                   NetHunterStore.apk KernelSU_Next_v3.2.0_33129-release.apk; do
+            curl -fsSL -o "/tmp/apks/$a" "$base/$a" 2>/dev/null \
+              || echo "::warning::$a not available from the archive"
+          done
+          ls -lh /tmp/apks
+
+      - name: Fuse
+        env:
+          FUSE_ROOTFS: ${{ inputs.fuse_rootfs }}
+          FUSE_APKS: ${{ inputs.fuse_apks }}
+        run: |
+          set -euo pipefail
+          args=(
+            --gh /tmp/isoroot
+            --system /tmp/isoroot/system.sfs
+            --kernel-dir /tmp/kdir
+            --out /tmp/build
+            --name "DarkMatter-NetHunter-KSU-6.12-amd64.iso"
+          )
+          [ "$FUSE_ROOTFS" = "true" ] && args+=(--kalifs /tmp/kali-rootfs.tar.xz)
+          [ "$FUSE_APKS" = "true" ]   && args+=(--apk-src /tmp/apks)
+
+          chmod +x sb/fuse_darkmatter_nh.sh
+          sb/fuse_darkmatter_nh.sh "${args[@]}"
+
+      - name: Report the result
+        run: |
+          set -euo pipefail
+          ISO=/tmp/build/DarkMatter-NetHunter-KSU-6.12-amd64.iso
+          ls -l "$ISO"
+          echo "--- boot records"
+          xorriso -indev "$ISO" -report_el_torito plain 2>/dev/null | grep -E "El Torito"
+          echo "--- top level"
+          xorriso -indev "$ISO" -find / -maxdepth 1 2>/dev/null | head -20
+          {
+            echo "iso:    $(basename "$ISO")"
+            echo "bytes:  $(stat -c %s "$ISO")"
+            echo "sha256: $(sha256sum "$ISO" | cut -d' ' -f1)"
+            echo "kernel: run ${{ steps.kern.outputs.run_id }}"
+            echo "rootfs: $([ "${{ inputs.fuse_rootfs }}" = "true" ] && echo included || echo omitted)"
+            echo "apks:   $([ "${{ inputs.fuse_apks }}" = "true" ] && echo included || echo omitted)"
+            echo "built:  $(date -u +%FT%TZ)"
+          } | tee /tmp/build/ISO-INFO.txt
+
+      - name: Upload the ISO
+        uses: actions/upload-artifact@v7
+        with:
+          name: darkmatter-nhpro-iso-x86_64
+          path: |
+            /tmp/build/DarkMatter-NetHunter-KSU-6.12-amd64.iso
+            /tmp/build/ISO-INFO.txt
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 7
