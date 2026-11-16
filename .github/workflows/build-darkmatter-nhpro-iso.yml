@@ -47,7 +47,14 @@ permissions:
 env:
   BASE_ISO_ID: dark-matter-exo-4.7
   BASE_ISO_FILE: DarkMatter_Exo4.7.iso
-  KALI_ROOTFS_URL: https://kali.download/nethunter-images/current/rootfs/kali-nethunter-rootfs-full-amd64.tar.xz
+  # One zip holds both the NetHunter APKs and the Kali rootfs, and its rootfs
+  # member is byte-identical to the standalone one, so this replaces two
+  # downloads with one.
+  NH_ZIP: https://kali.download/nethunter-images/current/kali-nethunter-2026.3-generic-amd64-full.zip
+  # Everything lands here.  maximize-build-space moves the workspace onto the
+  # large volume and shrinks / on purpose, so writing to /tmp runs out of room:
+  # the artifact download died with "no space left on device" at ~2 GB.
+  WORK: ${{ github.workspace }}/build
 
 jobs:
   iso:
@@ -68,8 +75,24 @@ jobs:
           remove-codeql: 'true'
           remove-docker-images: 'true'
 
-      - name: Report disk
-        run: df -h /
+      - name: Report disk and pick a work volume
+        run: |
+          set -euo pipefail
+          df -h /
+          mkdir -p "$WORK"
+          # Put every scratch file on the big volume too.  gh run download
+          # writes its zip to $TMPDIR, which defaults to the shrunken root --
+          # that is what produced "no space left on device" on the first run.
+          echo "TMPDIR=$WORK/tmp" >> "$GITHUB_ENV"
+          mkdir -p "$WORK/tmp"
+          avail=$(df -B1 --output=avail "$WORK" | tail -1 | tr -d ' ')
+          echo "work volume free: $(numfmt --to=iec "$avail")"
+          # 2 GB kernel artifact + 1.3 GB ISO + 2.5 GB zip + ~9 GB of working
+          # copies.  Fail now rather than halfway through a repack.
+          if [ "$avail" -lt $((12 * 1024 * 1024 * 1024)) ]; then
+            echo "::error::only $(numfmt --to=iec "$avail") on the work volume; need 12G"
+            exit 1
+          fi
 
       - name: Checkout Super-Builders
         uses: actions/checkout@v7
@@ -102,32 +125,32 @@ jobs:
           fi
           echo "kernel run: $RUN_ID"
           echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
-          mkdir -p /tmp/kern
+          mkdir -p $WORK/kern
           gh run download "$RUN_ID" -R "${{ github.repository }}" \
-            -n darkmatter-nhpro-x86_64 -D /tmp/kern
-          find /tmp/kern -maxdepth 3 -name vmlinuz -o -maxdepth 3 -name System.map | head
+            -n darkmatter-nhpro-x86_64 -D $WORK/kern
+          find $WORK/kern -maxdepth 3 -name vmlinuz -o -maxdepth 3 -name System.map | head
 
       - name: Normalise the kernel payload
         run: |
           set -euo pipefail
           # The artifact nests things a couple of levels deep (boot/, out/).
-          V=$(find /tmp/kern -name vmlinuz -type f | head -1)
+          V=$(find $WORK/kern -name vmlinuz -type f | head -1)
           [ -n "$V" ] || { echo "no vmlinuz in artifact" >&2; exit 1; }
-          mkdir -p /tmp/kdir
-          cp "$V" /tmp/kdir/vmlinuz
-          M=$(find /tmp/kern -type d -path '*lib/modules/*' -name '6.12*' | head -1)
+          mkdir -p $WORK/kdir
+          cp "$V" $WORK/kdir/vmlinuz
+          M=$(find $WORK/kern -type d -path '*lib/modules/*' -name '6.12*' | head -1)
           if [ -n "$M" ]; then
-            mkdir -p /tmp/kdir/modules/lib/modules
-            cp -a "$M" /tmp/kdir/modules/lib/modules/
+            mkdir -p $WORK/kdir/modules/lib/modules
+            cp -a "$M" $WORK/kdir/modules/lib/modules/
           else
             echo "::warning::no 6.12 module tree in the artifact -- modules will not load"
           fi
-          file /tmp/kdir/vmlinuz
-          echo "modules: $(find /tmp/kdir/modules -name '*.ko*' 2>/dev/null | wc -l)"
+          file $WORK/kdir/vmlinuz
+          echo "modules: $(find $WORK/kdir/modules -name '*.ko*' 2>/dev/null | wc -l)"
           # Kernel config sanity: squashfs must be built in, or the image cannot
           # be mounted at boot (this is the bug that made the first build boot
           # to a black screen).
-          C=$(find /tmp/kern -name config -type f | head -1)
+          C=$(find $WORK/kern -name config -type f | head -1)
           if [ -n "$C" ]; then
             for o in CONFIG_SQUASHFS CONFIG_BLK_DEV_LOOP CONFIG_EXT4_FS; do
               grep -q "^$o=y" "$C" || { echo "::error::$o is not =y in the built kernel"; exit 1; }
@@ -138,10 +161,10 @@ jobs:
       - name: Fetch the DarkMatter base ISO
         run: |
           set -euo pipefail
-          curl -fL --retry 3 -o /tmp/base.iso \
+          curl -fL --retry 3 -o $WORK/base.iso \
             "https://archive.org/download/${BASE_ISO_ID}/${BASE_ISO_FILE}"
-          ls -l /tmp/base.iso
-          file /tmp/base.iso | grep -q ISO || { echo "not an ISO image" >&2; exit 1; }
+          ls -l $WORK/base.iso
+          file $WORK/base.iso | grep -q ISO || { echo "not an ISO image" >&2; exit 1; }
 
       - name: Check the base ISO has what we need
         run: |
@@ -152,40 +175,56 @@ jobs:
           # xorriso exits 0 even for a missing path, and its -exec lsdl column
           # layout shifts with the date, so parsing it is fragile.  Extract the
           # two files and stat them instead -- unambiguous.
-          mkdir -p /tmp/probe
+          mkdir -p $WORK/probe
           for f in isolinux/isolinux.bin boot/grub/efi.img; do
-            rm -f "/tmp/probe/${f##*/}"
-            xorriso -osirrox on -indev /tmp/base.iso \
-              -extract "/$f" "/tmp/probe/${f##*/}" >/dev/null 2>&1 || true
-            sz=$(stat -c %s "/tmp/probe/${f##*/}" 2>/dev/null || echo 0)
+            rm -f "$WORK/probe/${f##*/}"
+            xorriso -osirrox on -indev $WORK/base.iso \
+              -extract "/$f" "$WORK/probe/${f##*/}" >/dev/null 2>&1 || true
+            sz=$(stat -c %s "$WORK/probe/${f##*/}" 2>/dev/null || echo 0)
             [ "$sz" -gt 0 ] \
               || { echo "base ISO: /$f missing or empty" >&2; exit 1; }
             echo "base ISO: /$f ($sz bytes)"
           done
 
-      - name: Fetch the Kali NetHunter rootfs
+      - name: Fetch the NetHunter installer zip
+        if: ${{ inputs.fuse_rootfs || inputs.fuse_apks }}
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 -o "$WORK/nh.zip" "${NH_ZIP}"
+          ls -l "$WORK/nh.zip"
+          unzip -t "$WORK/nh.zip" >/dev/null
+          echo "installer zip verified"
+          unzip -l "$WORK/nh.zip" | grep -E 'apk|kalifs' || true
+
+      - name: Extract the Kali rootfs
         if: ${{ inputs.fuse_rootfs }}
         run: |
           set -euo pipefail
-          curl -fL --retry 3 -o /tmp/kali-rootfs.tar.xz "${KALI_ROOTFS_URL}"
-          ls -l /tmp/kali-rootfs.tar.xz
-          xz -t /tmp/kali-rootfs.tar.xz
+          # One member of the installer zip; same bytes as the standalone
+          # rootfs download, so there is no reason to fetch it twice.
+          unzip -o -j -q "$WORK/nh.zip" 'kalifs-full-amd64.tar.xz' -d "$WORK"
+          mv -f "$WORK/kalifs-full-amd64.tar.xz" "$WORK/kali-rootfs.tar.xz"
+          ls -l "$WORK/kali-rootfs.tar.xz"
+          xz -t "$WORK/kali-rootfs.tar.xz"
           echo "rootfs archive verified"
 
-      - name: Stage the NetHunter APKs
+      - name: Extract the NetHunter APKs
         if: ${{ inputs.fuse_apks }}
         run: |
           set -euo pipefail
-          mkdir -p /tmp/apks
-          # The APK set is published with the base; take what is available and
-          # do not fail the build if one is missing.
-          base="https://archive.org/download/${BASE_ISO_ID}"
-          for a in NetHunter.apk NetHunterKeX.apk NetHunterTerminal.apk \
-                   NetHunterStore.apk KernelSU_Next_v3.2.0_33129-release.apk; do
-            curl -fsSL -o "/tmp/apks/$a" "$base/$a" 2>/dev/null \
-              || echo "::warning::$a not available from the archive"
+          mkdir -p "$WORK/apks"
+          unzip -o -j -q "$WORK/nh.zip" 'data/app/*.apk' -d "$WORK/apks"
+          # KernelSU-Next must match the kernel: this APK is v3.4.2, the same
+          # tag the kernel was built against.
+          ksu=$(curl -fsS "https://api.github.com/repos/KernelSU-Next/KernelSU-Next/releases/latest" \
+                | python3 -c 'import json,sys;d=json.load(sys.stdin);print([a["browser_download_url"] for a in d["assets"] if a["name"].endswith("-release.apk") and "spoofed" not in a["name"]][0])')
+          curl -fsSL -o "$WORK/apks/KernelSU-Next-manager.apk" "$ksu"
+          ls -lh "$WORK/apks"
+          # An APK is a zip; prove each one is not an error page.
+          for a in "$WORK"/apks/*.apk; do
+            unzip -l "$a" >/dev/null || { echo "$a is not an APK" >&2; exit 1; }
           done
-          ls -lh /tmp/apks
+          echo "all APKs valid"
 
       - name: Fuse
         env:
@@ -197,13 +236,13 @@ jobs:
           # carry leftovers from earlier local runs, and those do not belong
           # in a release image.
           args=(
-            --base-iso /tmp/base.iso
-            --kernel-dir /tmp/kdir
-            --out /tmp/build
+            --base-iso $WORK/base.iso
+            --kernel-dir $WORK/kdir
+            --out $WORK/out
             --name "DarkMatter-NetHunter-KSU-6.12-amd64.iso"
           )
-          [ "$FUSE_ROOTFS" = "true" ] && args+=(--kalifs /tmp/kali-rootfs.tar.xz)
-          [ "$FUSE_APKS" = "true" ]   && args+=(--apk-src /tmp/apks)
+          [ "$FUSE_ROOTFS" = "true" ] && args+=(--kalifs $WORK/kali-rootfs.tar.xz)
+          [ "$FUSE_APKS" = "true" ]   && args+=(--apk-src $WORK/apks)
 
           chmod +x sb/fuse_darkmatter_nh.sh
           sb/fuse_darkmatter_nh.sh "${args[@]}"
@@ -211,7 +250,7 @@ jobs:
       - name: Report the result
         run: |
           set -euo pipefail
-          ISO=/tmp/build/DarkMatter-NetHunter-KSU-6.12-amd64.iso
+          ISO=$WORK/out/DarkMatter-NetHunter-KSU-6.12-amd64.iso
           ls -l "$ISO"
           echo "--- boot records"
           xorriso -indev "$ISO" -report_el_torito plain 2>/dev/null | grep -E "El Torito"
@@ -225,15 +264,15 @@ jobs:
             echo "rootfs: $([ "${{ inputs.fuse_rootfs }}" = "true" ] && echo included || echo omitted)"
             echo "apks:   $([ "${{ inputs.fuse_apks }}" = "true" ] && echo included || echo omitted)"
             echo "built:  $(date -u +%FT%TZ)"
-          } | tee /tmp/build/ISO-INFO.txt
+          } | tee $WORK/out/ISO-INFO.txt
 
       - name: Upload the ISO
         uses: actions/upload-artifact@v7
         with:
           name: darkmatter-nhpro-iso-x86_64
           path: |
-            /tmp/build/DarkMatter-NetHunter-KSU-6.12-amd64.iso
-            /tmp/build/ISO-INFO.txt
+            $WORK/out/DarkMatter-NetHunter-KSU-6.12-amd64.iso
+            $WORK/out/ISO-INFO.txt
           compression-level: 0
           if-no-files-found: error
           retention-days: 7
