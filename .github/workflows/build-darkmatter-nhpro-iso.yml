@@ -127,6 +127,11 @@ jobs:
           fi
           echo "kernel run: $RUN_ID"
           echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          # Clear first.  $WORK is a persistent path on this VM, unlike a fresh
+          # hosted runner, so a previous attempt's files are still there and gh
+          # refuses to extract over them:
+          #   error extracting "out/System.map": openat System.map: file exists
+          rm -rf "$WORK/kern"
           mkdir -p $WORK/kern
           gh run download "$RUN_ID" -R "${{ github.repository }}" \
             -n darkmatter-nhpro-x86_64 -D $WORK/kern
