@@ -286,6 +286,11 @@ jobs:
           [ -n "$RID" ] && [ "$RID" != "null" ] \
             || { echo "::warning::no successful Build APK run to pre-bake from"; exit 0; }
           echo "builder apk from $SRC_REPO run $RID"
+          # $WORK is a persistent path on this VM, so a previous attempt's files
+          # are still there and gh refuses to extract over them:
+          #   error extracting "app-release-unsigned.apk": file exists
+          # Clear the target first so a re-run is idempotent.
+          rm -rf "$WORK/builder"
           mkdir -p "$WORK/builder"
           gh run download "$RID" -R "$SRC_REPO" -n anyrealm-builder-apk -D "$WORK/builder"
           APK=$(find "$WORK/builder" -name '*.apk' -type f -print -quit)
