@@ -176,15 +176,39 @@ jobs:
             mkdir -p $WORK/kdir/modules/lib/modules
             cp -a "$M" $WORK/kdir/modules/lib/modules/
           else
-            echo "::warning::no 6.12 module tree in the artifact -- modules will not load"
+            # Fatal, not a warning.  A 6.12 kernel with no 6.12 modules is an
+            # image that cannot load amdgpu or the Wi-Fi driver -- it boots to a
+            # black screen, which is exactly what run 44116016186 produced.
+            echo "::error::no 6.12 module tree in the artifact -- refusing to build an image whose kernel cannot load its drivers"
+            echo "artifact module layout:"
+            find $WORK/kern -type d -name modules -o -type d -name 'lib' | head -20
+            exit 1
           fi
           file $WORK/kdir/vmlinuz
           echo "modules: $(find $WORK/kdir/modules -name '*.ko*' 2>/dev/null | wc -l)"
           # Kernel config sanity: squashfs must be built in, or the image cannot
           # be mounted at boot (this is the bug that made the first build boot
           # to a black screen).
-          # config or config.gz -- the artifact carries one of them.
-          C=$(find $WORK/kern -name 'config*' -type f -print -quit)
+          # Pick the kernel's OWN config, not any look-alike.
+          #
+          # The artifact also ships boot/config-pro.ref, which is NetHunter
+          # Pro's stock reference config: CONFIG_SQUASHFS=m there, so an
+          # unqualified glob rejects a perfectly good build.  Order matters --
+          # ask for boot/config explicitly (that is what "Stage artefacts"
+          # writes), then any config/config.gz, and never a *.ref.
+          # if/then, not a bare [ -f ] && ... : under set -e a false test in a
+          # loop body ends the step.
+          C=""
+          for cand in "$WORK/kern/boot/config" "$WORK/kern/config"; do
+            if [ -f "$cand" ]; then
+              C="$cand"
+              break
+            fi
+          done
+          if [ -z "$C" ]; then
+            C=$(find $WORK/kern \( -name 'config' -o -name 'config.gz' \) \
+                  -type f -print -quit)
+          fi
           if [ -n "$C" ]; then
             case "$C" in
               *.gz) CFG=$(mktemp "$WORK/cfg.XXXXXX"); gzip -dc "$C" > "$CFG" ;;
