@@ -302,3 +302,90 @@ and most widely deployed one. What differs is component naming and a restricted
 user-facing surface — not the kernel contract. `execve` does not care which libc
 the ELF interpreter names, and VFS does not distinguish a bionic process from a
 glibc one.
+
+## The measurement: a GKI tree against the matching mainline tag
+
+The claim that the GKI is a different kernel from Linux is testable, so
+`build-helpers/gki-is-linux.sh` tests it. Run against the GKI branch this device
+uses:
+
+```sh
+./build-helpers/gki-is-linux.sh --fetch android12-5.10
+```
+
+Measured 2026-11-17 against `torvalds/linux` at `v5.10`:
+
+| directory | shared with mainline | added by the GKI |
+|---|---|---|
+| `drivers/android` | 9 files (`binder.c`, `binder_alloc.c`, `binder_alloc_selftest.c`, `binder_alloc.h`, `binder_internal.h`, `binder_trace.h`, `binderfs.c`, `Kconfig`, `Makefile`) | `debug_symbols.c`, `vendor_hooks.c` |
+| `drivers/staging/android` | 5 files | `debug_kinfo.c`, `debug_kinfo.h` |
+| `drivers/dma-buf/heaps` | 4 files | `deferred-free-helper.c/.h`, `page_pool.c/.h` (mainline's `heap-helpers.c/.h` dropped) |
+
+Every subsystem a fused image depends on is present in both: `fs/ext4`,
+`fs/f2fs`, `fs/overlayfs`, `net/netfilter`, `security/selinux`, `kernel/cgroup`,
+`mm`, `ipc`.
+
+So the entire Android contribution to the kernel in these directories is **two
+instrumentation files plus four dma-heap helpers**. `binder` and `binderfs` —
+what people assume is "the Android kernel" — are mainline Linux. They were
+written by Google, contributed upstream, and are maintained there.
+
+What the GKI actually is, then, is a **support contract**: a frozen exported
+symbol surface (`android/abi_gki_aarch64*`) plus a build configuration
+(`build.config.*`) that guarantees one vendor module loads on many devices. Both
+are metadata. Neither is code that changes what a process can do.
+
+This is why the "-9" and the branch names matter at all, and why they stop
+mattering the moment you stop shipping vendor modules that need to load on
+someone else's kernel. A NUKI build compiles the kernel and its modules
+together. There is no foreign module to satisfy, so there is no ABI to freeze,
+so there is no reason to keep `build.config.*` — which is precisely the tree
+`AR-NUKI-genevn` is: `build.config.common` returns 404, and the two files that
+remain (`build.config.anyrealm.kernel`, `build.config.msm.parrot`) are inert.
+Its `Makefile` reads `NAME = AnyRealm NUKI`.
+
+The identity check that still works mechanically: `scripts/setlocalversion` in
+`AR-NUKI-genevn` is **byte-for-byte identical** (5444 B) to the one in
+`aosp-mirror/kernel_common@android12-5.10`. Same versioning script, same
+`execve`, same VFS, same scheduler. The trailing number those scripts emit comes
+from `KMI_GENERATION`, and a tree with no `build.config.common` has no
+`KMI_GENERATION` — so it cannot be a GKI by construction, and does not need to be.
+
+`AR-NUKI-genevn` still carries `android/abi_gki_aarch64*` (33 entries incl.
+`ACK_SHA` = `android12-5.10-2023-09_r1`). That is deliberate: the files are a
+record of which upstream contract the tree forked from, not something the build
+consults. Keeping the receipt does not put you back in the payment system.
+
+## The phone has three names, and they are not synonyms
+
+Reconciled from the trees on 2026-11-17, because the build will fail an
+AnyKernel device check if this is wrong:
+
+| name | layer | where it is written down |
+|---|---|---|
+| `genevn` | what the bootloader reports | `device/motorola/yume/board-info.txt`: `require board=genevn` |
+| `yume` | what Motorola's device/vendor trees call it | `moto-common/android_device_motorola_yume@14`, `PRODUCT_MODEL := moto g stylus 5g 2023` |
+| `XT2315` | the model number | `PizzaG/android_device_motorola_genevn@TWRP-12.1` |
+| `genevn_g` | variant suffix | same `TARGET_DEVICE_ALT` line |
+
+The recovery tree accepts all four in one line:
+
+```
+TARGET_DEVICE_ALT += genevn_g genevn yume XT2315
+```
+
+`AnyKernel`'s installer matches `ro.product.device` (and three vendor variants)
+against `device.name1..8`. It shipped with only `genevn` and `genevn_g`, so a
+unit reporting `yume` would be refused by a package built for it. Fixed by
+reading the aliases from `device-profiles.json` rather than hand-copying them:
+
+```sh
+./build-helpers/sync-anykernel-devices.sh --check <anykernel-dir>   # exit 1 if out of sync
+./build-helpers/sync-anykernel-devices.sh <anykernel-dir>           # rewrite the block
+```
+
+Credit where the work came from: the `yume` device and vendor trees are
+**PizzaG**'s (`github.com/PizzaG`), carried forward through `moto-common`.
+`015stray91/android_device_motorola_genevn` was forked from
+`Satan19/android_device_motorola_yume`, which no longer exists on GitHub — the
+fork is the only surviving copy, so there is nothing to rebase against.

@@ -33,7 +33,151 @@
       "kernel_tree_note": "AR-NUKI-genevn is the real genevn kernel tree (5.10.240, arch/arm64 + drivers present, fs/susfs.c and fs/zeromount.c already in-tree). The previous value kernel-msm-1 was wrong: that repo carries only README.md, CROSS_REFERENCES.md and fs/koto/ -- it is the source repo in the Colonel chain, not buildable. kernel-zenith is the separate x86_64 tree for the DarkMatter ISO and must not be used for this device.",
       "build_target_note": "NUKI = Native Unified Kernel Image, NURFS = Native Unified Root File System. One kernel image built whole from AR-NUKI-genevn with the user space integrated natively -- no chroot, proot, container or libc translator. This is NOT a GKI build: there is no KMI to match and no separately-built vendor module set. The android_version field records lineage (what the tree derives from), not a Google branch being built.",
       "edition": "mobile",
-      "edition_note": "The mobile edition of AnyRealm: the same NUKI/NURFS architecture on arm64, packaged as a flashable kernel instead of an ISO."
+      "edition_note": "The mobile edition of AnyRealm: the same NUKI/NURFS architecture on arm64, packaged as a flashable kernel instead of an ISO.",
+      "board": {
+        "_note": "Read from BoardConfigCommon.mk of android_device_motorola_sm6450-common@lineage-23.0, not guessed.",
+        "boot_header_version": 4,
+        "kernel_page_size": 4096,
+        "kernel_base": "0x00000000",
+        "kernel_image_name": "Image",
+        "ramdisk_compression": "lz4",
+        "uses_generic_kernel_image": true,
+        "needs_dtboimage": true,
+        "dtbo_partition_size": 25165824,
+        "uses_metadata_partition": true,
+        "flash_block_size": 262144,
+        "arch": "arm64",
+        "arch_variant": "armv8-2a-dotprod",
+        "cpu_variant_runtime": "kryo385",
+        "abi": "arm64-v8a",
+        "bootconfig": [
+          "androidboot.hardware=qcom",
+          "androidboot.memcg=1",
+          "androidboot.usbcontroller=a600000.dwc3"
+        ],
+        "super_partition_size": 6786383872,
+        "dynamic_partitions_size": 3388997632,
+        "dynamic_partition_group": "mot_dynamic_partitions",
+        "dynamic_partition_list": [
+          "system_ext",
+          "system",
+          "product",
+          "vendor",
+          "vendor_dlkm"
+        ],
+        "vendor_boot_image_size": "$(BOARD_BOOTIMAGE_PARTITION_SIZE)",
+        "kernel_cmdline": "video=vfb:640x400,bpp=32,memsize=3072000 printk.devkmsg=on firmware_class.path=/vendor/firmware_mnt/image bootconfig",
+        "kernel_tags_offset": "0x00000100",
+        "kernel_offset": "0x00008000"
+      },
+      "trees": {
+        "_note": "Every piece forked for this device, verified with git ls-remote on 2026-11-17. `parent` is where the fork came from, recorded so a future rebase has a target.",
+        "device": "015stray91/android_device_motorola_genevn",
+        "device_branch": "OrangeFox_12.1",
+        "common": "015stray91/android_device_motorola_sm6450-common",
+        "common_branch": "lineage-23.0",
+        "vendor_common": "015stray91/android_vendor_motorola_sm6450-common",
+        "vendor_common_branch": "14",
+        "vendor_yume": "015stray91/android_vendor_motorola_yume",
+        "vendor_yume_branch": "14",
+        "device_yume": "015stray91/Device_motorola_yume-1",
+        "device_yume_branch": "14",
+        "device_common_alt": "015stray91/device_motorola_sm6450-common",
+        "device_common_alt_branch": "14",
+        "kernel_vendor": "015stray91/android_kernel_motorola_msm-5.10",
+        "kernel_vendor_branch": "14",
+        "siblings": {
+          "sm7435_common": "015stray91/android_device_motorola_sm7435-common",
+          "sm7435_branch": "lineage-23.0"
+        },
+        "parents": {
+          "android_device_motorola_genevn": "Satan19/android_device_motorola_yume (deleted from GitHub; fork is the only copy)",
+          "android_device_motorola_sm6450-common": "drmarble/android_device_motorola_sm6450-common",
+          "android_vendor_motorola_sm6450-common": "moto-common/android_vendor_motorola_sm6450-common",
+          "android_vendor_motorola_yume": "moto-common/android_vendor_motorola_yume",
+          "Device_motorola_yume-1": "moto-common/android_device_motorola_yume",
+          "android_kernel_motorola_msm-5.10": "moto-common/android_kernel_motorola_msm-5.10",
+          "android_device_motorola_sm7435-common": "Motorola-Parrot/android_device_motorola_sm7435-common"
+        },
+        "recovery_upstream": "PizzaG/android_device_motorola_genevn",
+        "recovery_upstream_branch": "TWRP-12.1",
+        "device_tree_upstream_yume": "moto-common/android_device_motorola_yume",
+        "device_tree_upstream_yume_branch": "14"
+      },
+      "declared_but_missing": {
+        "_note": "The common device tree's lineage.dependencies names these four, and none exists upstream at any of the three plausible owners (015stray91, moto-common, LineageOS). This is the concrete reason AR-NUKI-genevn is self-sufficient: the tree it would have fetched does not exist.",
+        "repos": [
+          {
+            "repository": "android_kernel_motorola_sm6450",
+            "target_path": "kernel/motorola/sm6450"
+          },
+          {
+            "repository": "android_kernel_motorola_sm6450-modules",
+            "target_path": "kernel/motorola/sm6450-modules"
+          },
+          {
+            "repository": "android_kernel_motorola_sm6450-devicetrees",
+            "target_path": "kernel/motorola/sm6450-devicetrees"
+          }
+        ],
+        "present_at_lineage": [
+          "android_hardware_motorola"
+        ],
+        "consequence": "TARGET_KERNEL_SOURCE in BoardConfig points at kernel/motorola/sm7435 and the dependency list asks for sm6450; neither kernel repo exists, so the vendor tree alone cannot produce a kernel. AR-NUKI-genevn supplies that half.",
+        "ar_nuki_build_config": {
+          "_note": "AR-NUKI-genevn still contains build.config.* files, including build.config.anyrealm.kernel. They are inert: the tree does not invoke them and nothing outside it overrides the build. The claim of severance is about behaviour, not about the absence of filenames.",
+          "files_present": [
+            "build.config.anyrealm.kernel",
+            "build.config.msm.parrot",
+            "build.config.gki.aarch64",
+            "build.config.moto"
+          ],
+          "invoked_by_build": "no"
+        }
+      },
+      "kernel_config_chain": [
+        "gki_defconfig",
+        "vendor/parrot_GKI.config",
+        "vendor/ext_config/moto-parrot.config",
+        "vendor/ext_config/moto-parrot-gki.config"
+      ],
+      "ext_module_roots": [
+        "kernel/motorola/sm7435-modules"
+      ],
+      "module_load_lists": {
+        "vendor": "modules.load",
+        "vendor_boot": "modules.load.vendor_boot",
+        "recovery": "modules.load.recovery",
+        "ramdisk": "modules.load.ramdisk",
+        "counts": {
+          "vendor": 271,
+          "ramdisk": 87,
+          "recovery": 289
+        }
+      },
+      "identity": {
+        "_note": "Reconciled 2026-11-17 by reading the trees, not by guessing. Three names refer to the one phone, and they are not synonyms: each is a different layer.",
+        "codename_board": "genevn",
+        "codename_tree": "yume",
+        "model_number": "XT2315",
+        "device_alts": [
+          "genevn_g",
+          "genevn",
+          "yume",
+          "XT2315"
+        ],
+        "evidence": {
+          "board_info": "device/motorola/yume/board-info.txt: 'require board=genevn'",
+          "target_device_alt": "PizzaG/android_device_motorola_genevn@TWRP-12.1 BoardConfig.mk: 'TARGET_DEVICE_ALT += genevn_g genevn yume XT2315'",
+          "product_model": "moto-common/android_device_motorola_yume@14 device.mk: 'PRODUCT_MODEL := moto g stylus 5g 2023'"
+        },
+        "consequence": "AnyKernel device check must accept all four aliases, because the recovery tree accepts all four. A kernel that flashes only on 'genevn' would refuse a package built for a unit that reports 'yume'.",
+        "upstream_credits": {
+          "yume_trees": "PizzaG (https://github.com/PizzaG) -- the yume codename and the device/vendor trees for this phone come from PizzaG's work, carried forward through moto-common",
+          "recovery": "PizzaG/android_device_motorola_genevn@TWRP-12.1",
+          "note": "015stray91/android_device_motorola_genevn@OrangeFox_12.1 was forked from Satan19/android_device_motorola_yume, which no longer exists on GitHub (404). The fork is the surviving copy -- do not expect to rebase against it."
+        }
+      }
     },
     "darkmatter-vivobook": {
       "build_target": "NUKI/NURFS",
