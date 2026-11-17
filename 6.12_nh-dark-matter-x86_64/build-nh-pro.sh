@@ -87,17 +87,38 @@ apply_patch() {  # apply_patch <dir> <patch>
   fi
 }
 
+# Patch lists come from pins.env, which is the manifest.  They used to be
+# hardcoded here, and drifted: the script applied three kernel-side patches and
+# one KSU-side patch while pins.env declared four and two, silently dropping
+# 55_susfs_task_mmu_6.12_fix (repairs show_smap() after 50/51 rewrite it) and
+# 75_ksu_next_susfs_classic_shims (keeps KernelSU-Next's syscall hooks from
+# colliding with the SUSFS fs-level hooks).  A build that does not match its own
+# manifest is worse than one with no manifest.
+#
+# pins.env wraps these across lines with trailing backslashes, so join the
+# continuations before splitting -- a plain `grep "^KEY="` yields only the first
+# patch of the list.
+pin_list() {   # pin_list <KEY>  -> one patch path per line
+  awk -v want="$1=" '
+    { sub(/#.*/, "") }
+    { line = line $0 }
+    !/\\[[:space:]]*$/ {
+        if (index(line, want) == 1) { sub(/^[^=]*=/, "", line); print line }
+        line = ""; next
+    }
+    { sub(/\\[[:space:]]*$/, "", line) }
+  ' "${HERE}/pins.env" | tr -d '"' | tr ' ' '\n' | sed '/^$/d'
+}
+
 # Kernel-side (fs/, include/, mm/, security/) — from the tree root.
-for p in \
-  "${HERE}/KernelSU-Next/50_add_susfs_in_gki-android16-6.12.patch" \
-  "${HERE}/KernelSU-Next/51_enhanced_susfs-android16-6.12.patch" \
-  "${HERE}/KernelSU-Next/60_zeromount-android16-6.12.patch" ; do
-  apply_patch "${SRC}" "$p"
-done
+while IFS= read -r p; do
+  apply_patch "${SRC}" "${HERE}/${p}"
+done < <(pin_list PATCH_KERNEL_SIDE)
 
 # KernelSU-side (kernel/...) — from inside the KernelSU source dir.
-apply_patch "${SRC}/KernelSU" \
-  "${HERE}/KernelSU-Next/70_ksu_next_susfs_x86_64_consolidated.patch"
+while IFS= read -r p; do
+  apply_patch "${SRC}/KernelSU" "${HERE}/${p}"
+done < <(pin_list PATCH_KSU_SIDE)
 
 # --- 4. config --------------------------------------------------------------
 say "Configuring (x86_64 + SUSFS + ZeroMount + NetHunter Pro drivers)"
