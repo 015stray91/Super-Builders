@@ -215,7 +215,7 @@ Not all kernel versions are identical. Key differences:
 
 | Kernel | Variants | Notable Differences |
 |--------|----------|---------------------|
-| 5.4 | 2 (SukiSU, ReSukiSU) | GKI 1.0 (`android12-5.4`, 5.4.302). Requires `UAPI_HEADER_TEST=n`. No KSU-Next/WKSU (lack `TWA_RESUME`). Single sublevel. |
+| 5.4 | 2 (SukiSU, ReSukiSU) | Two cases: Google `android12-5.4` is GKI 1.0 (`KMI_GENERATION=9`, 5.4.302); a vendor 5.4 tree is pre-GKI/monolithic. Requires `UAPI_HEADER_TEST=n`. No KSU-Next/WKSU (lack `TWA_RESUME`). |
 | 5.10 | 4 | Baseline GKI. Has `HIDDEN_NAME` and `HARDENED` toggles (unique to 5.10). |
 | 5.15 | 4 | `struct nameidata` natively has `state` field (upstream patch adds it redundantly). |
 | 6.1 | 4 | `vfs_statx` takes `struct filename *`. `inode_permission` gained `mnt_userns` parameter. |

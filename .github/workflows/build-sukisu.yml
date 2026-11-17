@@ -152,6 +152,21 @@ jobs:
         bash "$GITHUB_WORKSPACE/$VERSION_DIR/build-helpers/sync-gki-source.sh" \
           "$KERNEL_ROOT" "$ANDROID_VER" "$KERNEL_VER" "${{ inputs.sub_level }}" "$OS_PATCH"
 
+        # Report the identity the tree claims for itself, and check it matches
+        # the target.  KMI_GENERATION is what makes 5.10-9 (android12-5.10)
+        # different from 5.10-4 (android13-5.10); both are 5.10.270.  Catching a
+        # mismatch here is far cheaper than after a two-hour compile.
+        # shellcheck source=/dev/null
+        source "$GITHUB_WORKSPACE/build-helpers/resolve-version-dir.sh"
+        IDENTITY="$(gki_identity "$KERNEL_ROOT/common")"
+        echo "::notice::kernel identity: $IDENTITY (target ${VERSION_DIR})"
+        WANT_BRANCH="$(sed -n 's/^BRANCH=//p' "$KERNEL_ROOT/common/build.config.common" 2>/dev/null | head -1)"
+        if [ -n "$WANT_BRANCH" ] && [ "$WANT_BRANCH" != "$VERSION_DIR" ]; then
+          echo "::error::checked-out tree is '$WANT_BRANCH', expected '$VERSION_DIR'"
+          echo "::error::these are different Android KMIs of the same kernel -- refusing to build"
+          exit 1
+        fi
+
     - name: Extract Sublevel
       env:
         INPUT_SUB_LEVEL: ${{ inputs.sub_level }}

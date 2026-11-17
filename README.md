@@ -96,19 +96,42 @@ The kernels built here provide the **infrastructure layer** — the hiding primi
 > Creating `android13-5.10/` is the correct shape should that target be added:
 > the same kernel, a different KMI.
 
-### 5.4 (GKI 1.0)
+### 5.4 (two different things)
 
-| Android | Kernel | Sublevels | Variants | Patches | Build |
-|---------|--------|-----------|----------|---------|-------|
-| Android 12 | 5.4 (LTS) | 302 | SukiSU, ReSukiSU | ✅ | ✅ All green |
+| What | Kernel | Sublevels | Variants | Patches | Build |
+|------|--------|-----------|----------|---------|-------|
+| Google GKI branch `android12-5.4` | 5.4.302 | 302 | SukiSU, ReSukiSU | ✅ | ✅ All green |
 
-`android12-5.4` **is** a GKI branch (5.4.302 with a KMI) — it is the oldest one
-built here, not a pre-GKI tree. KernelSU-Next and WKSU are unsupported for an
-unrelated reason: they need `TWA_RESUME`, which does not exist before 5.7.
+**5.4 is ambiguous, and both readings are correct depending on whose tree you
+mean.** There is no single answer to "is 5.4 GKI?", so don't look for one:
+
+- **A vendor's own 5.4 tree** (Moto, Samsung, most 5.4 devices in the wild) is
+  **pre-GKI and monolithic** — vendor and core built as one image, no KMI, no
+  module contract. This is what most people mean by "5.4", and it's why the row
+  was previously labelled Pre-GKI.
+- **Google's `android12-5.4` branch** (5.4.302) is **GKI 1.0**: it carries an
+  `android/abi_gki_aarch64` KMI symbol list. This repo builds *this* one — the
+  GKI builders `repo init` Google's manifest, never a vendor tree.
+
+KernelSU-Next and WKSU are unsupported on either for an unrelated reason: they
+need `TWA_RESUME`, which does not exist before 5.7.
 
 > Read `KERNEL-ANDROID-MAPPING.md` before changing anything here. The Android
 > release and the kernel version are independent: `android12-5.10` and
-> `android13-5.10` are both 5.10.270 but different KMIs, not synonyms.
+> `android13-5.10` are both 5.10.270 but different KMIs, not synonyms. The
+> trailing number in GKI shorthand such as `5.10-9` is `KMI_GENERATION` from
+> `build.config.common`, not a sub-level — `5.10-9` is `android12-5.10` (GKI 1.0)
+> and there is no `5.10-11`.
+
+### The ISO target is not a GKI target
+
+`android16-6.12` in the Vivobook profile records where the **kernel tree** came
+from (`kernel-zenith` is based on Google's `android16-6.12`), not the OS in the
+ISO. The ISO runs **DarkMatter Exo 4.7**, which is Android-x86 7.1.1. That
+kernel is built monolithic for x86_64 with `KMI_GENERATION=0` and no GKI module
+split, so none of the arm64 KMI machinery above applies to it — the merge of
+the Kali user space into DarkMatter's rootfs happens at the filesystem level,
+under one kernel, not through a KMI contract.
 
 ### Not Yet Done
 

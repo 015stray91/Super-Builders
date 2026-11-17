@@ -43,3 +43,34 @@ resolve_version_dir() {
     fi
     return 1
 }
+
+# Report the GKI identity of a checked-out kernel tree: KMI generation and
+# whether the tree actually carries Google's GKI module contract.
+#
+#   * KMI_GENERATION comes from build.config.common (the same field that
+#     scripts/setlocalversion turns into the "-android12-9" release suffix).
+#     It is NOT a sub-level: 5.10-9 and 5.10-4 are both 5.10.270.
+#   * A tree with no android/ directory is not GKI at all -- monolithic, like a
+#     vendor 5.4/5.10 tree or an x86_64 build from a GKI-derived source. Those
+#     have nothing to match, so this is informational, not an error.
+#
+# Usage: gki_identity <kernel_tree_root>
+gki_identity() {
+    local tree="${1:?kernel tree required}"
+    local gen branch contract
+
+    if [ -f "$tree/build.config.common" ]; then
+        gen=$(sed -n 's/^KMI_GENERATION=//p' "$tree/build.config.common" | head -1)
+        branch=$(sed -n 's/^BRANCH=//p' "$tree/build.config.common" | head -1)
+    fi
+    gen="${gen:-0}"
+
+    if [ -d "$tree/android" ]; then
+        contract="gki"
+    else
+        contract="monolithic"
+    fi
+
+    printf 'kmi_generation=%s branch=%s contract=%s\n' \
+        "$gen" "${branch:-unknown}" "$contract"
+}
