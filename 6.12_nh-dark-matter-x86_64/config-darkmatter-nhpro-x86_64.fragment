@@ -201,7 +201,15 @@ CONFIG_CFG80211=m
 CONFIG_MAC80211=m
 CONFIG_RTW89=m
 CONFIG_RTW89_8852BE=m
+# RTW88 is a container: each chip driver is its own option with no default,
+# so CONFIG_RTW88=m alone ships no PCI Wi-Fi adapter at all.  The Vivobook's
+# card is a Realtek 8821CE (10ec:c821); these four lines are exactly what the
+# working Ubuntu 6.8 kernel on that machine has set.
 CONFIG_RTW88=m
+CONFIG_RTW88_CORE=m
+CONFIG_RTW88_PCI=m
+CONFIG_RTW88_8821C=m
+CONFIG_RTW88_8821CE=m
 CONFIG_MT76_CORE=m
 CONFIG_MT76_USB=m
 CONFIG_MT7921E=m
