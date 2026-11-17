@@ -535,6 +535,12 @@ EOF
     [ -d "$ROOT/system" ] && ROOT="$ROOT/system"
 
     used_kb=$(sudo du -sk "$ROOT" | cut -f1)
+    # Say where the weight is.  A surprise here usually means modules with
+    # debug info or a duplicate payload, and it is much cheaper to see it than
+    # to work it out from the final image size.
+    echo "  largest directories in the payload:"
+    sudo du -sk "$ROOT"/* 2>/dev/null | sort -rn | head -6 \
+        | awk '{printf "    %8s  %s\n", $1/1024 "M", $2}' 
     # ext4 needs room for metadata and the journal; 15% headroom is enough for
     # a mostly-read-only system partition and keeps the image from being huge.
     img_kb=$(( used_kb + used_kb / 6 + 65536 ))
@@ -591,7 +597,13 @@ if [ "$MAKE_ISO" -eq 1 ]; then
         die "no boot image found (isolinux/isolinux.bin or boot/grub/efi.img)"
     fi
 
-    args=(-as mkisofs -r -V "DARKMATTER_NH_KSU" -o "$OUT_ISO")
+    # -iso-level 3 is required, not cosmetic.  Plain ISO9660 level 1 refuses
+    # any single file of 4 GiB or more ("File cannot be added to image because
+    # its size is 4 GiB or larger / A file is bigger than supported by used
+    # standard"), and once the Kali rootfs is fused in, system.sfs is 5+ GB.
+    # Level 3 allows multi-extent files and still writes both El Torito
+    # entries, so BIOS and UEFI boot are unaffected.
+    args=(-as mkisofs -r -iso-level 3 -V "DARKMATTER_NH_KSU" -o "$OUT_ISO")
     if [ -n "$BOOT_BIOS" ]; then
         args+=(-b isolinux/isolinux.bin -c isolinux/boot.cat
                -no-emul-boot -boot-load-size 4 -boot-info-table)
