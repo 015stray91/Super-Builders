@@ -73,10 +73,11 @@ NH_APK_SRC=""
 # Installed with dpkg-deb --extract under apt Dir= redirection, so no chroot is
 # involved; see install_pkgs_into_tree().
 EXTRA_PKGS=""
-# GPU/device firmware, from a firmware-nonfree .deb or an unpacked directory.
-# Lands in the tree's /lib/firmware (i.e. /system/lib/firmware live), which is
-# where the kernel's fw_path points.  See stage_firmware() for why the deb's own
-# /usr/lib layout cannot be copied verbatim.
+# Device firmware, from firmware-nonfree .debs or unpacked directories.
+# Repeatable: --firmware amd.deb --firmware realtek.deb.  Each package is
+# unpacked into the tree's /lib/firmware (i.e. /system/lib/firmware live), which
+# is where the kernel's fw_path points.  See stage_firmware() for why the deb's
+# own /usr/lib layout cannot be copied verbatim.
 FIRMWARE_SRC=""
 FIRMWARE_SRC=""
 # Directory containing this script, so helper files (installer/, the patch
@@ -103,7 +104,7 @@ while [ $# -gt 0 ]; do
         --kalifs)     KALIFS="$2"; shift 2 ;;
         --apk-src)    NH_APK_SRC="$2"; shift 2 ;;
         --pkgs)       EXTRA_PKGS="$2"; shift 2 ;;
-        --firmware)   FIRMWARE_SRC="$2"; shift 2 ;;
+        --firmware)   FIRMWARE_SRC="${FIRMWARE_SRC:+$FIRMWARE_SRC,}$2"; shift 2 ;;
         --out)        OUT_DIR="$2"; shift 2 ;;
         --name)       ISO_NAME="$2"; shift 2 ;;
         --no-iso)     MAKE_ISO=0; shift ;;
@@ -581,27 +582,42 @@ stage_firmware() {
     fi
     [ -d "$d" ] || { echo "  firmware: $src is not a directory or .deb"; return 1; }
 
-    # Accept either layout: a package root, an extracted /usr/lib/firmware, or
-    # the amdgpu directory itself.
+    # Locate the firmware root: a package root, an extracted /usr/lib/firmware,
+    # or the firmware directory itself.
+    #
+    # The test has to be structural, not a list of known driver names.  An
+    # earlier version looked for amdgpu/ and so silently rejected every package
+    # except firmware-amd-graphics; then a list of GPU/WiFi names rejected
+    # firmware-misc-nonfree, which carries intel/, moxa/, cxgb3/ and a dozen
+    # other trees and is a perfectly valid thing to stage.
+    #
+    # So: take the first candidate that actually contains something, and let
+    # the kernel ignore trees it has no driver for.  Unused firmware is a few
+    # MB on a 12 GB ISO; a missing blob is a dead device.
     local fwroot=""
     for c in "$d/usr/lib/firmware" "$d/lib/firmware" "$d"; do
-        if [ -d "$c/amdgpu" ]; then fwroot="$c"; break; fi
+        [ -d "$c" ] || continue
+        if [ -n "$(find "$c" -mindepth 1 -maxdepth 1 -type d | head -1)" ] || \
+           [ -n "$(find "$c" -mindepth 1 -maxdepth 1 -type f -name '*.bin' | head -1)" ]; then
+            fwroot="$c"; break
+        fi
     done
-    [ -n "$fwroot" ] || { echo "  firmware: no amdgpu/ under $src"; return 1; }
+    [ -n "$fwroot" ] || { echo "  firmware: nothing to stage under $src"; return 1; }
 
     sudo mkdir -p "$T/lib/firmware"
     sudo rsync -a "$fwroot/" "$T/lib/firmware/" \
         || { echo "  firmware: rsync failed"; return 1; }
 
-    local n total broken
-    n=$(find "$T/lib/firmware/amdgpu" -maxdepth 1 -type f | wc -l)
-    total=$(find "$T/lib/firmware/amdgpu" -maxdepth 1 -type l | wc -l)
+    local n total broken tops
+    tops=$(find "$T/lib/firmware" -mindepth 1 -maxdepth 1 -type d | wc -l)
+    n=$(find "$T/lib/firmware" -type f | wc -l)
+    total=$(find "$T/lib/firmware" -type l | wc -l)
     broken=0
     while IFS= read -r l; do
         [ -e "$l" ] || broken=$((broken + 1))
-    done < <(find "$T/lib/firmware/amdgpu" -maxdepth 1 -type l)
+    done < <(find "$T/lib/firmware" -type l)
 
-    echo "  firmware -> /system/lib/firmware/amdgpu: $n blobs, $total symlinks, $broken broken"
+    echo "  firmware -> /system/lib/firmware: $tops top-level trees, $n files, $total symlinks, $broken broken"
     [ "$broken" -eq 0 ] || echo "  warning: $broken dangling symlink(s); those blobs will fail to load"
     return 0
 }
@@ -824,7 +840,18 @@ KPROF
             # Firmware after packages, so a firmware-nonfree deb installed by
             # --pkgs is also picked up if --firmware was not given explicitly.
             if [ -n "$FIRMWARE_SRC" ]; then
-                stage_firmware "$FIRMWARE_SRC" "$SYS" || true
+                # Repeatable: --firmware a.deb --firmware b.deb, or one
+                # comma-separated list.  Each package adds its own trees
+                # (amdgpu/, rtw88/, rtl_bt/, ...) without disturbing the others.
+                _ifs="$IFS"; IFS=','
+                for _fw in $FIRMWARE_SRC; do
+                    IFS="$_ifs"
+                    [ -n "$_fw" ] || { IFS=','; continue; }
+                    stage_firmware "$_fw" "$SYS" || true
+                    IFS=','
+                done
+                IFS="$_ifs"
+                unset _ifs _fw
             fi
         fi
 
