@@ -1,4 +1,4 @@
-name: Build DarkMatter + NetHunter Pro install ISO
+name: AnyRealm desktop - NUKI/NURFS install ISO (x86_64)
 
 # Takes the kernel produced by build-darkmatter-x86_64-nhpro.yml and fuses it
 # with the DarkMatter android-x86 base and the Kali NetHunter rootfs into a
@@ -250,7 +250,7 @@ jobs:
             --base-iso $WORK/base.iso
             --kernel-dir $WORK/kdir
             --out $WORK/out
-            --name "DarkMatter-NetHunter-KSU-6.12-amd64.iso"
+            --name "AnyRealm-NUKI-NURFS-desktop-6.12-amd64.iso"
           )
           # if/then, not `[ ... ] && args+=(...)`: under set -e a false test
           # makes the whole && expression return 1 and kills the step.
@@ -267,7 +267,7 @@ jobs:
       - name: Report the result
         run: |
           set -euo pipefail
-          ISO=$WORK/out/DarkMatter-NetHunter-KSU-6.12-amd64.iso
+          ISO=$WORK/out/AnyRealm-NUKI-NURFS-desktop-6.12-amd64.iso
           ls -l "$ISO"
           echo "--- boot records"
           xorriso -indev "$ISO" -report_el_torito plain 2>/dev/null | grep -E "El Torito"
@@ -305,7 +305,7 @@ jobs:
           # expanded in a `with:` block -- the first attempt silently uploaded
           # nothing ("No files were found with the provided path: $WORK/...").
           path: |
-            build/out/DarkMatter-NetHunter-KSU-6.12-amd64.iso
+            build/out/AnyRealm-NUKI-NURFS-desktop-6.12-amd64.iso
             build/out/ISO-INFO.txt
           compression-level: 0
           if-no-files-found: error

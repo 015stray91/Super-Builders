@@ -1,7 +1,7 @@
 <p align="center">
   <h1 align="center">⚡ Super-Builders</h1>
-  <p align="center"><b>NUKI kernel builds with SUSFS + ZeroMount — GKI trees supported too</b></p>
-  <p align="center">One tree, one kernel image, one user space. Every KSU variant. One CI pipeline.</p>
+  <p align="center"><b>AnyRealm — NUKI kernel images with NURFS unified rootfs, plus SUSFS + ZeroMount</b></p>
+  <p align="center">One tree, one kernel image, one user space. Desktop and mobile editions. One CI pipeline.</p>
   <p align="center">
     <img src="https://img.shields.io/badge/status-beta-orange?style=for-the-badge" alt="Beta">
     <img src="https://img.shields.io/badge/NUKI-one_kernel_one_rootfs-green?style=for-the-badge&logo=linux" alt="NUKI">
@@ -25,20 +25,22 @@
 
 Super-Builders is the **kernel build pipeline** for [ZeroMount](https://github.com/Enginex0/zeromount). It takes a kernel tree, applies the SUSFS + ZeroMount VFS patches, and compiles it across every supported target and KSU variant via GitHub Actions CI.
 
-### The build model: NUKI + NURFS, not GKI
+### AnyRealm, built on NUKI + NURFS
 
-**NUKI** (Native Unified Kernel Image) and **NURFS** (Native Unified Root File System) are the point of this repo's own builds:
+**AnyRealm** is the project. **NUKI** and **NURFS** are the architecture it is built on:
 
-- **one kernel image**, compiled whole from one tree — no separated vendor module set, no KMI to match at boot;
-- **one user space**, integrated natively — no chroot, proot, container, or libc translator;
+- **NUKI** — Native Unified **Kernel Image**: one kernel, compiled whole from one tree. No separated vendor module set, no KMI to match at boot.
+- **NURFS** — Native Unified **Root File System**: one user space, integrated natively. No chroot, proot, container, or libc translator.
 - **bionic and glibc both run**, because the kernel is the kernel. `execve` does not check which libc an ELF interpreter names.
 
-Two targets are built this way today:
+The same architecture ships as two editions:
 
-| Target | Tree | Arch |
-|---|---|---|
-| Moto G Stylus 5G 2023 (genevn) | `AR-NUKI-genevn`, 5.10.240 | arm64 |
-| ASUS Vivobook Go 14/15 — DarkMatter + NetHunter Pro ISO | `kernel-zenith`, 6.12 | x86_64 |
+| Edition | Produces | Tree | Arch |
+|---|---|---|---|
+| **desktop** | bootable install ISO for a PC — DarkMatter's rootfs with the Kali NetHunter Pro user space merged in | `kernel-zenith`, 6.12 | x86_64 |
+| **mobile** | flashable kernel for the Moto G Stylus 5G 2023 | `AR-NUKI-genevn`, 5.10.240 | arm64 |
+
+The desktop edition is the ASUS Vivobook Go 14/15 build; its ISO is the deliverable. Both editions are one kernel and one rootfs — the difference is the arch and the packaging, not the model.
 
 The **GKI track** below is a separate, genuinely different thing: Google's core-kernel-plus-vendor-modules contract, matched through a frozen KMI. It is supported here for devices that need it, and `KERNEL-ANDROID-MAPPING.md` explains how the two differ and why the version numbers confuse people. GKI is the reference, not the default.
 

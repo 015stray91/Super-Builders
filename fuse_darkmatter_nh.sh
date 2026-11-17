@@ -2,7 +2,30 @@
 set -euo pipefail
 
 # ==============================================================================
-# DarkMatter + NetHunter Pro (amd64) + KernelSU-Next  --  install image fuser
+# AnyRealm - NUKI/NURFS  --  DESKTOP edition (x86_64 installer image)
+#
+# AnyRealm is the project. NUKI/NURFS is the architecture it is built on.
+# This script produces the desktop edition of it:
+#
+#   AnyRealm  NUKI  Native Unified Kernel Image
+#             NURFS Native Unified Root File System
+#             desktop edition  --  x86_64, bootable install ISO for a PC
+#
+# The mobile edition is the same architecture on arm64: AR-NUKI-genevn for the
+# Moto G Stylus 5G 2023, built by build-ksu-next.yml.
+#
+# Concretely, this artefact is:
+#
+#   NUKI  Native Unified Kernel Image   -- one kernel built whole from
+#                                          kernel-zenith 6.12, SUSFS + ZeroMount
+#                                          + KernelSU-Next compiled in
+#   NURFS Native Unified Root File System -- DarkMatter's rootfs with the Kali
+#                                          NetHunter Pro user space merged into
+#                                          it, one rootfs, one user space
+#
+# There is no chroot, proot, container or libc translator in the result, and no
+# separated vendor module set with a KMI to match at boot. bionic and glibc both
+# run because they share one kernel and one VFS.
 #
 # Merges the Kali rootfs, NetHunter payload and the CI-built kernel into a
 # DarkMatter android-x86 ISO tree, then emits a bootable ISO.
@@ -49,7 +72,7 @@ NH_APK_SRC=""
 # scripts) resolve regardless of the caller's working directory.
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUT_DIR="$PWD/out"
-ISO_NAME="DarkMatter-NetHunter-KSU-amd64.iso"
+ISO_NAME="AnyRealm-NUKI-NURFS-desktop-amd64.iso"
 MAKE_ISO=1
 KEEP_WORK=0
 NO_FUSE=0
@@ -70,7 +93,7 @@ while [ $# -gt 0 ]; do
         --no-iso)     MAKE_ISO=0; shift ;;
         --no-fuse)    NO_FUSE=1; shift ;;
         --keep-work)  KEEP_WORK=1; shift ;;
-        -h|--help)    sed -n '2,42p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help)    sed -n '2,62p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *)            die "unknown argument: $1" ;;
     esac
 done
@@ -1095,7 +1118,7 @@ if [ "$MAKE_ISO" -eq 1 ]; then
     # -iso-level 3 allows files over 4 GiB.  The tree no longer needs it, but
     # the Kali rootfs still rides along as one large file and level 3 costs
     # nothing -- both El Torito entries are still written.
-    args=(-as mkisofs -R -iso-level 3 -V "DARKMATTER_NH_KSU" -o "$OUT_ISO")
+    args=(-as mkisofs -R -iso-level 3 -V "ANYREALM_NUKI" -o "$OUT_ISO")
     if [ -n "$BOOT_BIOS" ]; then
         args+=(-b isolinux/isolinux.bin -c isolinux/boot.cat
                -no-emul-boot -boot-load-size 4 -boot-info-table)
