@@ -115,7 +115,12 @@ jobs:
       run: |
         CONFIG="${ANDROID_VER}-${KERNEL_VER}-${SUB_LEVEL}"
         KERNEL_ROOT="$GITHUB_WORKSPACE/$CONFIG"
-        VERSION_DIR="${ANDROID_VER}-${KERNEL_VER}"
+        # Resolve the patch directory for this exact (Android, kernel) pair.
+        # Fails loudly rather than substituting another Android KMI -- see
+        # build-helpers/resolve-version-dir.sh and KERNEL-ANDROID-MAPPING.md.
+        # shellcheck source=/dev/null
+        source "$GITHUB_WORKSPACE/build-helpers/resolve-version-dir.sh"
+        VERSION_DIR="$(resolve_version_dir "$ANDROID_VER" "$KERNEL_VER")" || exit 1
         mkdir -p "$KERNEL_ROOT"
 
         chmod +x "$GITHUB_WORKSPACE/git-repo/repo"

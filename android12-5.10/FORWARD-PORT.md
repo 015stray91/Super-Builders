@@ -20,6 +20,12 @@ patch set across two different axes, and it is worth keeping them apart:
 | Android version | android12 | android16 | GKI enablement and the KernelSU glue around it, not the VFS |
 | architecture | arm64 (msm) | amd64 (Android-x86) | nothing in SUSFS/ZeroMount; only device-specific fixes |
 
+Android is not a separate kind of operating system from "Linux mobile" — it is
+the first and largest one. What differs is naming and a restricted user-facing
+surface, not the kernel contract. That is why the third row is empty and why
+the same patch serves both: `execve` does not care which libc the ELF
+interpreter names, and VFS does not know a bionic process from a glibc one.
+
 The third row being empty is the useful finding, and it is checkable rather
 than assumed:
 

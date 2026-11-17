@@ -45,6 +45,9 @@ SYSTEM_IMG=""
 KERNEL_DIR=""
 KALIFS=""
 NH_APK_SRC=""
+# Directory containing this script, so helper files (installer/, the patch
+# scripts) resolve regardless of the caller's working directory.
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUT_DIR="$PWD/out"
 ISO_NAME="DarkMatter-NetHunter-KSU-amd64.iso"
 MAKE_ISO=1
@@ -863,21 +866,84 @@ SEMD
 fi
 
 # ------------------------------------------------------------------------------
-# 4b. The installer needs no patch
+# 4b. The installer: keep the user in charge of the layout
 # ------------------------------------------------------------------------------
 # install.img copies a fixed list of paths from the CD to the target, including
 # $sysimg, which on ext4 is "android/system" -- a directory.  Because the Kali
 # tree is merged into that directory at build time, the stock installer already
-# carries the whole unified OS with no change.  That is the point of doing the
-# merge here rather than staging a tarball for the target to unpack.
+# carries the whole unified OS, so the copying needs no change at all.
 #
-# (An earlier revision patched 1-install to copy a top-level /nhpro.  That was
-# for the staged-tarball model and is gone with it.)
+# What does need a change is partitioning.  The interactive path is already
+# free-form -- it hands the disk to cgdisk or cfdisk and gets out of the way,
+# which is how a Linux installer should behave and is left alone.  The *auto*
+# path is not: it hardcodes
+#
+#     sgdisk --new=1::+260M --typecode=1:EF00 --largest-new=2
+#
+# so the one number the user cannot choose is the one UEFI cares about.  On a
+# 256 GB NVMe a 260 MiB ESP is a rounding error and cannot hold a rescue kernel
+# or a second OS; on a 32 GB eMMC the same 260 MiB is a real fraction of the
+# disk.  Either way the answer differs per machine, which means it should not
+# be a constant.
+#
+# Note what is NOT changed: GPT itself.  UEFI firmware must accept MBR tables
+# as well, so a fixed GPT-only policy would be wrong too.  The requirement is
+# narrower -- a partition of type EF00 (GPT) or 0xEF (MBR) holding FAT with
+# /EFI/BOOT/BOOTX64.EFI.  The installer keeps using GPT because that is what
+# its sgdisk path does, but the size, the root filesystem and everything else
+# stay the user's decision.
+if [ -d "$ISO_ROOT" ] && [ "$NO_FUSE" -eq 0 ]; then
+    if [ -f "$ISO_ROOT/install.img" ]; then
+        note "Installer: making the ESP size a choice"
+
+        INST_WORK="$WORK/install-work"
+        rm -rf "$INST_WORK"; mkdir -p "$INST_WORK"
+        if compgen -G "$ISO_ROOT/install.img" >/dev/null && \
+           ( cd "$INST_WORK" && zcat "$ISO_ROOT/install.img" 2>/dev/null | cpio -idm --quiet 2>/dev/null ); then
+            ONE_INSTALL="$(find "$INST_WORK" -maxdepth 3 -name '1-install' -print -quit 2>/dev/null)"
+            if [ -n "$ONE_INSTALL" ] && [ -f "$HERE/installer/patch-1-install.py" ]; then
+                if python3 "$HERE/installer/patch-1-install.py" "$ONE_INSTALL"; then
+                    # Rebuild with mode and ownership preserved.  cpio -o takes
+                    # the modes from the files, so the umask has to be 0 or the
+                    # installer's own 0775 directories come back 0755; and the
+                    # archive must be root-owned or install.img's files land
+                    # owned by whoever built the ISO.  The staging directory
+                    # itself is chmod 0775 to match the stock archive, whose
+                    # root entry is 0775 (verified against the original: 38
+                    # entries, identical file list, uid/gid 0:0).
+                    (
+                        cd "$INST_WORK" || exit 1
+                        chmod 0775 .
+                        umask 000
+                        find . -print0 | sort -z | cpio --null -o -H newc --owner=0:0 --quiet 2>/dev/null | gzip -9 -n > "$WORK/install.img.new"
+                    )
+                    if [ -s "$WORK/install.img.new" ]; then
+                        mv "$WORK/install.img.new" "$ISO_ROOT/install.img"
+                        echo "  install.img rebuilt ($(stat -c %s "$ISO_ROOT/install.img") bytes)"
+                        echo "  auto-install now asks for a 100M..N GiB ESP; root takes the rest"
+                    else
+                        echo "  warning: install.img rebuild produced nothing; leaving the stock one"
+                        echo "           (it will still install, with a fixed 260M ESP)"
+                    fi
+                else
+                    echo "  warning: installer did not match the expected text; left unpatched"
+                fi
+            else
+                echo "  note: no 1-install in install.img, or patch script missing -- installer unchanged"
+            fi
+        else
+            echo "  warning: could not unpack install.img; installer unchanged"
+        fi
+        rm -rf "$INST_WORK"
+    else
+        echo "  note: no install.img -- live boot only, nothing to patch"
+    fi
+fi
+
 if [ -d "$ISO_ROOT/nhpro" ]; then
     echo "  warning: /nhpro still present from an older run -- removing"
     rm -rf "$ISO_ROOT/nhpro"
 fi
-echo "  installer untouched: system/ is copied natively"
 
 # ------------------------------------------------------------------------------
 # 4d. Display: greetd + phosh, not SurfaceFlinger

@@ -81,7 +81,7 @@ The kernels built here provide the **infrastructure layer** — the hiding primi
 
 | Android | Kernel | Sublevels | Variants | Patches | Build |
 |---------|--------|-----------|----------|---------|-------|
-| Android 12 | 5.10 | 107 → 246 | SukiSU, ReSukiSU, KSU-Next, WKSU | ✅ | ✅ All green |
+| Android 12 | 5.10 | 107 → 270 | SukiSU, ReSukiSU, KSU-Next, WKSU | ✅ | ✅ All green |
 | Android 13 | 5.10 | 107 → 246 | SukiSU, ReSukiSU, KSU-Next, WKSU | ✅ | 🔄 In progress |
 | Android 13 | 5.15 | 41 → 194 | SukiSU, ReSukiSU, KSU-Next, WKSU | ✅ | 🔄 In progress |
 | Android 14 | 5.15 | 131 → 194 | SukiSU, ReSukiSU, KSU-Next, WKSU | ✅ | 🔄 In progress |
@@ -89,13 +89,26 @@ The kernels built here provide the **infrastructure layer** — the hiding primi
 | Android 15 | 6.6 | 30 → 118 | SukiSU, ReSukiSU, KSU-Next, WKSU | ✅ | 🔄 In progress |
 | Android 16 | 6.12 | 23 → 58 | SukiSU, ReSukiSU, KSU-Next, WKSU | ✅ | 🔄 In progress |
 
-### Pre-GKI
+> **Patch directories.** Only `android12-5.10/` exists today. The other rows
+> have workflows that resolve `android<NN>-<ver>` and now fail fast instead of
+> substituting a different Android KMI (which is what an older `case` fallback
+> did — an Android 14 + 5.10 device silently got the Android 12 patch set).
+> Creating `android13-5.10/` is the correct shape should that target be added:
+> the same kernel, a different KMI.
+
+### 5.4 (GKI 1.0)
 
 | Android | Kernel | Sublevels | Variants | Patches | Build |
 |---------|--------|-----------|----------|---------|-------|
 | Android 12 | 5.4 (LTS) | 302 | SukiSU, ReSukiSU | ✅ | ✅ All green |
 
-> KernelSU-Next and WKSU are not supported on 5.4 — they lack pre-5.7 compatibility (`TWA_RESUME` enum).
+`android12-5.4` **is** a GKI branch (5.4.302 with a KMI) — it is the oldest one
+built here, not a pre-GKI tree. KernelSU-Next and WKSU are unsupported for an
+unrelated reason: they need `TWA_RESUME`, which does not exist before 5.7.
+
+> Read `KERNEL-ANDROID-MAPPING.md` before changing anything here. The Android
+> release and the kernel version are independent: `android12-5.10` and
+> `android13-5.10` are both 5.10.270 but different KMIs, not synonyms.
 
 ### Not Yet Done
 

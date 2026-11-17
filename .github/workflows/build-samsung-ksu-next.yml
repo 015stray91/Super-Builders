@@ -170,25 +170,18 @@ jobs:
         EXTRA_ARTIFACTS=$(echo "$DEVICE_JSON" | jq -r '.extra_artifacts // [] | join(",")')
         DEFCONFIG_NAME=$(echo "$DEVICE_JSON" | jq -r '.defconfig // "gki_defconfig"')
 
-        VERSION_DIR="${ANDROID_VER}-${KERNEL_VER}"
-        if [ ! -d "$GITHUB_WORKSPACE/$VERSION_DIR" ]; then
-          case "$KERNEL_VER" in
-            5.4)   VERSION_DIR="android12-5.4" ;;
-            5.10)  VERSION_DIR="android12-5.10" ;;
-            5.15)  VERSION_DIR="android13-5.15" ;;
-            6.1)   VERSION_DIR="android14-6.1" ;;
-            6.6)   VERSION_DIR="android15-6.6" ;;
-            6.12)  VERSION_DIR="android16-6.12" ;;
-            *)     echo "::error::No patch directory for kernel $KERNEL_VER (tried ${ANDROID_VER}-${KERNEL_VER})"
-                   exit 1 ;;
-          esac
-          echo "::notice::Mapped ${ANDROID_VER}-${KERNEL_VER} -> ${VERSION_DIR}"
-        fi
-        if [ ! -d "$GITHUB_WORKSPACE/$VERSION_DIR" ]; then
-          echo "FATAL: patch directory '$VERSION_DIR' not found"
-          ls "$GITHUB_WORKSPACE"
-          exit 1
-        fi
+        # Resolve the patch set for this exact (Android, kernel) pair.
+        #
+        # This used to fall back to a `case` keyed on kernel version alone, so
+        # an Android 14 + 5.10 device silently got the android12-5.10 patch set.
+        # The Android KMI and the kernel version are independent axes:
+        # android12-5.10 and android13-5.10 are both 5.10.270 but different
+        # KMIs, and a kernel built for one will not match the other's vendor
+        # modules.  Fail instead of guessing.  See KERNEL-ANDROID-MAPPING.md.
+        # shellcheck source=/dev/null
+        source "$GITHUB_WORKSPACE/build-helpers/resolve-version-dir.sh"
+        VERSION_DIR="$(resolve_version_dir "$ANDROID_VER" "$KERNEL_VER")" || exit 1
+        echo "::notice::Patch set for ${ANDROID_VER}-${KERNEL_VER} -> ${VERSION_DIR}"
         GKI_TAG="${VERSION_DIR}"
 
         {
