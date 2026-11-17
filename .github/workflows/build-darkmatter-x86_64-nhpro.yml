@@ -38,6 +38,17 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 180
 
+    # Same trap as the ISO workflow: `pack` defaults to true but is a
+    # workflow_dispatch input, so on a push there are no inputs and
+    # `inputs.pack` is empty -- every push run silently skipped "Stage
+    # artefacts" and uploaded a 12 MB artifact with no modules in it. That is
+    # why the fused ISO ships an empty module tree for its own kernel, and why
+    # modular drivers such as amdgpu never load. Resolve once, for either
+    # trigger.
+    env:
+      PACK: ${{ github.event_name != 'workflow_dispatch' || inputs.pack }}
+      OBFUSCATE: ${{ github.event_name == 'workflow_dispatch' && inputs.obfuscate }}
+
     steps:
       - name: Checkout Super-Builders
         uses: actions/checkout@v7
@@ -197,7 +208,7 @@ jobs:
           gzip -9 -c /tmp/out/.config > /tmp/out/config.gz
 
       - name: Build goat (GCC GIMPLE) plugin
-        if: ${{ inputs.obfuscate }}
+        if: env.OBFUSCATE == 'true'
         run: |
           set -euo pipefail
           git clone -q --depth 1 "${{ steps.pins.outputs.goat_repo }}" /tmp/goat
@@ -214,7 +225,7 @@ jobs:
           set -euo pipefail
           cd /tmp/kernel
           KCFLAGS_EXTRA=""
-          if [ "${{ inputs.obfuscate }}" = "true" ]; then
+          if [ "$OBFUSCATE" = "true" ]; then
             # Only the substitution pass survives kernel code; FLA and BCF
             # crash inside GCC on computed gotos / irreducible CFGs.
             FLAGS="-fplugin=/tmp/goat/build/hellscape.so \
@@ -241,7 +252,7 @@ jobs:
           ls -lh /tmp/nh
 
       - name: Stage artefacts
-        if: ${{ inputs.pack }}
+        if: env.PACK == 'true'
         run: |
           set -euo pipefail
           B=/tmp/boot; rm -rf "$B"; mkdir -p "$B/modules"
@@ -264,7 +275,7 @@ jobs:
             echo "nethunter:  ${{ steps.pins.outputs.nh_ref }}"
             echo "susfs:      yes"
             echo "zeromount:  yes"
-            echo "obfuscate:  ${{ inputs.obfuscate }}"
+            echo "obfuscate:  $OBFUSCATE"
             echo "built:      $(date -u +%FT%TZ)"
           } > "$B/BUILD-INFO.txt"
           ( cd "$B" && find . -maxdepth 2 -type f -printf '%10s  %p\n' | sort -k2 )
