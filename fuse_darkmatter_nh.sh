@@ -68,6 +68,11 @@ SYSTEM_IMG=""
 KERNEL_DIR=""
 KALIFS=""
 NH_APK_SRC=""
+# Extra Debian packages to fetch from Kali and unpack into the merged tree.
+# Installed with dpkg-deb --extract under apt Dir= redirection, so no chroot is
+# involved; see install_pkgs_into_tree().
+EXTRA_PKGS=""
+FIRMWARE_SRC=""
 # Directory containing this script, so helper files (installer/, the patch
 # scripts) resolve regardless of the caller's working directory.
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -91,6 +96,8 @@ while [ $# -gt 0 ]; do
         --kernel-dir) KERNEL_DIR="$2"; shift 2 ;;
         --kalifs)     KALIFS="$2"; shift 2 ;;
         --apk-src)    NH_APK_SRC="$2"; shift 2 ;;
+        --pkgs)       EXTRA_PKGS="$2"; shift 2 ;;
+        --firmware)   FIRMWARE_SRC="$2"; shift 2 ;;
         --out)        OUT_DIR="$2"; shift 2 ;;
         --name)       ISO_NAME="$2"; shift 2 ;;
         --no-iso)     MAKE_ISO=0; shift ;;
@@ -516,6 +523,137 @@ else
     fi
 
     if [ -n "$KALIFS" ] && [ -f "$KALIFS" ]; then
+        # Install Debian packages into a merged tree without chroot.
+#
+# A chroot is out by design here -- it is the model this build replaces -- so
+# apt is pointed at the tree with Dir= flags, fetches .debs, and each one is
+# unpacked with dpkg-deb --extract.  That resolves dependencies through apt but
+# runs no maintainer scripts, which is the right trade for an image: the scripts
+# assume they are install-time in a booted system, and running them against a
+# tree that is not booted is what forces people into chroots in the first place.
+#
+# Anything needing a postinst (font caches, icon caches, ld.so.cache) is finished
+# by the first-boot step in the installed image, or harmlessly regenerated on
+
+# --- GPU / device firmware -------------------------------------------------
+#
+# A kernel module that loads is not the same thing as a GPU that works.  amdgpu
+# is `=m` in the x86_64 fragment, so the .ko is present either way; what it asks
+# for at probe time is microcode, and without it the driver fails and the boot
+# falls back to efifb/simpledrm at 1024x768 with no acceleration.
+#
+# The firmware cannot come from the vendor's Windows .exe.  An ASUS/AMD driver
+# package carries amdkmdag.sys and DLLs; its .bin files are display tuning
+# tables (h9_easu_*), not microcode.  Linux's microcode ships in the
+# firmware-nonfree packages, and Debian's is usually newer than Ubuntu's --
+# 20261019-1 at time of writing, 90 MB of amdgpu blobs.
+#
+# Two details decide whether this works:
+#
+#   1. Debian now installs firmware under /usr/lib/firmware (usrmerge).  The
+#      kernel's fw_path is /lib/firmware, so copying the deb layout verbatim
+#      produces a tree the kernel never looks in.
+#   2. In THIS tree /lib is Android's bionic directory.  Firmware goes to
+#      $SYS/lib/firmware -- which is /system/lib/firmware live -- and nowhere
+#      near /usr/lib.
+#
+# The package also carries ~129 relative symlinks (yellow_carp_ta -> psp_13_0_5_ta
+# and so on).  Mendocino has no psp_13_0_1_* of its own; it is yellow_carp, and
+# the symlinks are how that maps onto shared microcode.  rsync -a keeps them,
+# and the broken-link check below is what catches a partial copy leaving one
+# dangling.
+stage_firmware() {
+    local src="$1" treeroot="$2"
+    [ -n "$src" ] || return 0
+    local T="$treeroot"
+
+    local d="$src"
+    if [ -f "$src" ] && case "$src" in *.deb) true;; *) false;; esac; then
+        d="$WORK/fw-unpack"
+        sudo rm -rf "$d"; mkdir -p "$d"
+        dpkg-deb -x "$src" "$d" || { echo "  firmware: cannot unpack $src"; return 1; }
+    fi
+    [ -d "$d" ] || { echo "  firmware: $src is not a directory or .deb"; return 1; }
+
+    # Accept either layout: a package root, an extracted /usr/lib/firmware, or
+    # the amdgpu directory itself.
+    local fwroot=""
+    for c in "$d/usr/lib/firmware" "$d/lib/firmware" "$d"; do
+        if [ -d "$c/amdgpu" ]; then fwroot="$c"; break; fi
+    done
+    [ -n "$fwroot" ] || { echo "  firmware: no amdgpu/ under $src"; return 1; }
+
+    sudo mkdir -p "$T/lib/firmware"
+    sudo rsync -a "$fwroot/" "$T/lib/firmware/" \
+        || { echo "  firmware: rsync failed"; return 1; }
+
+    local n total broken
+    n=$(find "$T/lib/firmware/amdgpu" -maxdepth 1 -type f | wc -l)
+    total=$(find "$T/lib/firmware/amdgpu" -maxdepth 1 -type l | wc -l)
+    broken=0
+    while IFS= read -r l; do
+        [ -e "$l" ] || broken=$((broken + 1))
+    done < <(find "$T/lib/firmware/amdgpu" -maxdepth 1 -type l)
+
+    echo "  firmware -> /system/lib/firmware/amdgpu: $n blobs, $total symlinks, $broken broken"
+    [ "$broken" -eq 0 ] || echo "  warning: $broken dangling symlink(s); those blobs will fail to load"
+    return 0
+}
+
+
+# demand.
+install_pkgs_into_tree() {
+    local treeroot="$1" pkgs="$2"
+    [ -n "$pkgs" ] || return 0
+    [ -n "$KALIFS" ] || { echo "  --pkgs needs --kalifs: no package source without the Kali rootfs"; return 1; }
+
+    local T="$treeroot"
+    local key="$T/usr/share/keyrings/kali-archive-keyring.gpg"
+    [ -e "$key" ] || { echo "  warning: no Kali keyring in the tree, skipping $pkgs"; return 0; }
+
+    local list=/tmp/kali-pkgs.list
+    printf 'deb [signed-by=%s] http://http.kali.org/kali kali-rolling main contrib non-free non-free-firmware\n' \
+        "$key" | sudo tee "$list" >/dev/null
+
+    # Point apt entirely at the tree: state, status db, lists and cache.  Without
+    # Dir::State this writes into the host's /var/lib/apt and disagrees with the
+    # status db it is being told to use.
+    local A=(-o "Dir=$T" -o "Dir::State=$T/var/lib/apt"
+             -o "Dir::State::status=$T/var/lib/dpkg/status"
+             -o "Dir::Cache=$T/var/cache/apt"
+             -o "Dir::Etc::sourcelist=$list" -o "Dir::Etc::sourceparts=/dev/null"
+             -o "Dir::Etc::trusted=/dev/null" -o "Dir::Etc::trustedparts=/dev/null"
+             -o "APT::Architecture=amd64")
+
+    sudo mkdir -p "$T/var/lib/apt/lists/partial" "$T/var/cache/apt/archives/partial"
+    if ! sudo apt-get "${A[@]}" update >/dev/null 2>&1; then
+        echo "  warning: could not update package lists; skipping $pkgs"
+        return 0
+    fi
+
+    # --download-only first, so a resolution failure costs nothing and the count
+    # is known before anything is written into the tree.
+    if ! sudo apt-get "${A[@]}" -y --no-install-recommends --download-only \
+            install $pkgs >/dev/null 2>&1; then
+        echo "  warning: could not resolve: $pkgs"
+        return 0
+    fi
+
+    local n=0 fail=0 d
+    for d in "$T"/var/cache/apt/archives/*.deb; do
+        [ -e "$d" ] || continue
+        if sudo dpkg-deb --extract "$d" "$T" 2>/dev/null; then
+            n=$((n + 1))
+        else
+            fail=$((fail + 1))
+        fi
+    done
+    echo "  packages: $n unpacked into the tree, $fail failed"
+    # Leave the archives: they are small, and a failed unpack is easier to look at
+    # than to reproduce.
+    return 0
+}
+
         note "Merging the Kali rootfs into the system tree"
 
         KSTAGE="$WORK/kali-stage"
@@ -643,6 +781,45 @@ export PATH
 export MANPATH
 KPROF
             echo "  /etc/profile.d/10-kali-nethunter.sh written"
+        fi
+
+        # --- make the merged user space actually executable ------------------
+        #
+        # On a Debian/Kali rootfs /lib64/ld-linux-x86-64.so.2 is the ELF
+        # interpreter every dynamically linked binary names.  Kali ships the real
+        # file at /usr/lib64/ and relies on usrmerge to create the /lib64 symlink
+        # at boot.
+        #
+        # That can never happen here: Android owns /lib64 as a real directory full
+        # of bionic libraries, so usrmerge cannot replace it with a symlink, and
+        # --ignore-existing means Kali's copy could not overwrite it either.  The
+        # result is a tree where glibc binaries are present and none of them can
+        # start:
+        #
+        #   chroot . /usr/bin/dolphin  ->  No such file or directory
+        #
+        # which reads as a missing app rather than a missing loader.  Create the
+        # one symlink usrmerge would have created.  It is a single file inside
+        # Android's /lib64, so nothing bionic owns is touched.
+        for ld in /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2 \
+                  /usr/lib64/ld-linux-x86-64.so.2; do
+            if [ -e "$SYS$ld" ] && [ ! -e "$SYS/lib64/ld-linux-x86-64.so.2" ]; then
+                sudo ln -sfn "../${ld#/}" "$SYS/lib64/ld-linux-x86-64.so.2"
+                echo "  /lib64/ld-linux-x86-64.so.2 -> ../${ld#/} (usrmerge would have made this)"
+                break
+            fi
+        done
+        # Extra packages, after the loader is in place: resolving them needs a
+        # working apt and a tree whose interpreter exists.
+        if [ -n "$EXTRA_PKGS" ]; then
+            note "Installing extra packages into the merged tree: $EXTRA_PKGS"
+            install_pkgs_into_tree "$SYS" "$EXTRA_PKGS" || true
+
+            # Firmware after packages, so a firmware-nonfree deb installed by
+            # --pkgs is also picked up if --firmware was not given explicitly.
+            if [ -n "$FIRMWARE_SRC" ]; then
+                stage_firmware "$FIRMWARE_SRC" "$SYS" || true
+            fi
         fi
 
         rm -f "$WORK/kali.files" "$WORK/android.before"
