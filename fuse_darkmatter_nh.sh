@@ -314,10 +314,18 @@ else
 
     if [ -d "$SYSTEM_IMG" ]; then
         SYS_IS_DIR=1
-        SYS="$SYSTEM_IMG"
-        # A plain directory may or may not have the android top-level "system".
-        [ -d "$SYS/system" ] && SYS="$SYS/system"
-        echo "  system root: $SYS (directory)"
+        # Always work on our own copy.  The Kali merge adds paths to this tree,
+        # and writing into a directory the user passed on the command line
+        # corrupts their input -- it did, during testing: /kali and a nested
+        # system/system appeared in the source tree.
+        sudo mkdir -p "$WORK/sysroot"
+        sudo rsync -a "$SYSTEM_IMG/" "$WORK/sysroot/"
+        SYS="$WORK/sysroot"
+        # Do NOT descend on the mere presence of a system/ subdirectory: Kali's
+        # tarball has one, and a merged tree can too, so that check picked
+        # <sysroot>/system from a polluted input and then failed every marker
+        # test.  The marker check below decides, using build.prop/bin/etc.
+        echo "  system root: $SYS (copied from $SYSTEM_IMG)"
     elif unsquashfs -s "$SYSTEM_IMG" >/dev/null 2>&1; then
         WRAPPER="$(basename "$SYSTEM_IMG")"
         echo "  $(basename "$SYSTEM_IMG") is a squashfs wrapper"
@@ -446,93 +454,206 @@ else
         echo "  $n APKs -> /system/priv-app/"
     fi
 
-    # --- Kali rootfs ---
+    # --- Kali rootfs: merge it into the SAME rootfs ---
+    #
+    # This is the part that makes it a native unified OS rather than NetHunter
+    # Lite.  Lite keeps Kali in a tarball and chroots into /data/local/nhsystem
+    # at runtime: two user spaces, a proot-ish boundary, and the phone's CPU
+    # and RAM shared between two kernels' worth of assumptions.  Here there is
+    # one rootfs.  The Kali tree is merged into the Android system tree at
+    # BUILD time, so what ships on the ISO is already a single filesystem and
+    # the target just installs a directory.  No chroot, no proot, no container,
+    # no first-boot extraction, nothing to mount.
+    #
+    # The merge is additive and never overwrites Android.  Both trees claim
+    # bin, lib, lib64, media and system, and the two meanings are not the same:
+    #
+    #   Android                    Kali
+    #   -------                    ----
+    #   /system/bin  toybox, applets   /bin   coreutils, bash, apt
+    #   /system/lib  bionic .so        /lib   glibc .so
+    #   /system/etc  Android config    /etc   Debian config
+    #
+    # Overwriting either side breaks it: Android with glibc libc.so is a brick,
+    # Kali with bionic libc.so is equally dead.  So Kali's conflicting top-level
+    # paths go to /kali/<name>, and Kali's own non-conflicting ones (usr, var,
+    # opt, srv, home, root, run, boot) land at the top level where Debian
+    # expects them.  A symlink /kali/lib -> /lib is deliberately NOT created:
+    # the whole point is that the two libcs stay apart.
     if [ -z "$KALIFS" ]; then
         for cand in "$TREE"/nh-unpacked/rootfs/kali-amd64.tar.* "$GH_DIR"/nh-unpacked/rootfs/kali-amd64.tar.* "$GH_DIR"/rootfs/kali-amd64.tar.*; do
             [ -f "$cand" ] && { KALIFS="$cand"; break; }
         done
     fi
+
     if [ -n "$KALIFS" ] && [ -f "$KALIFS" ]; then
-        # The Kali rootfs does NOT belong inside /system.
-        #
-        # It is 2.2 GB compressed and ~8 GB expanded, and putting it in the
-        # system image charged it twice (once in the tree, once in the built
-        # image), ate the image's free space, and pushed system.sfs past the
-        # 4 GiB single-file limit.  None of that buys anything: it is not part
-        # of the Android system, it is the other half of the OS.
-        #
-        # Ship it at the top level of the ISO instead, as a single file the
-        # installer copies to the target and the first boot expands to a real
-        # directory on the NVMe.  Real files, real paths, no loop device.
-        sudo mkdir -p "$ISO_ROOT/nhpro"
-        # Keep the real extension: the Kali rootfs is .tar.xz, and naming it
-        # .tar.gz then extracting with `tar -zxf` fails on the first block.
+        note "Merging the Kali rootfs into the system tree"
+
+        KSTAGE="$WORK/kali-stage"
+        sudo rm -rf "$KSTAGE"; mkdir -p "$KSTAGE"
+
+        # Extract to a staging dir first so the layout can be inspected before
+        # anything touches the Android tree.  .tar.xz is the real format -- a
+        # .tar.gz name with xz inside fails on the first block, so pick the
+        # decompressor from the actual extension and try tar's autodetect last.
         case "$KALIFS" in
-            *.tar.xz|*.txz)   KALI_NAME=kalifs-amd64.tar.xz ;;
-            *.tar.gz|*.tgz)   KALI_NAME=kalifs-amd64.tar.gz ;;
-            *.tar.zst)        KALI_NAME=kalifs-amd64.tar.zst ;;
-            *.tar)            KALI_NAME=kalifs-amd64.tar ;;
-            *)                KALI_NAME="kalifs-amd64.$(basename "$KALIFS")" ;;
+            *.tar.xz|*.txz) sudo tar -xJf "$KALIFS" -C "$KSTAGE" ;;
+            *.tar.gz|*.tgz) sudo tar -xzf "$KALIFS" -C "$KSTAGE" ;;
+            *.tar.zst)      sudo tar --zstd -xf "$KALIFS" -C "$KSTAGE" ;;
+            *.tar)          sudo tar -xf  "$KALIFS" -C "$KSTAGE" ;;
+            *)              sudo tar -xf  "$KALIFS" -C "$KSTAGE" ;;
         esac
-        sudo cp -f "$KALIFS" "$ISO_ROOT/nhpro/$KALI_NAME"
-        echo "  rootfs -> /nhpro/$KALI_NAME ($(du -h "$KALIFS" | cut -f1))"
+
+        # Tarballs come rooted three ways: kali-amd64/ (Kali's packaging), a
+        # different single directory name, or a bare top level.  Pick whichever
+        # actually holds the root rather than assuming, and say which was used
+        # -- guessing wrong here silently merges an empty tree.
+        KSRC=""
+        for cand in "$KSTAGE/kali-amd64" "$KSTAGE"; do
+            if [ -d "$cand/etc" ] || [ -d "$cand/usr" ] || [ -d "$cand/bin" ]; then
+                KSRC="$cand"; break
+            fi
+        done
+        if [ -z "$KSRC" ]; then
+            # One directory deep, whatever it is called.
+            for cand in "$KSTAGE"/*/; do
+                [ -d "${cand}etc" ] || [ -d "${cand}usr" ] || continue
+                KSRC="${cand%/}"; break
+            done
+        fi
+        [ -n "$KSRC" ] \
+            || die "$(basename "$KALIFS") does not look like a rootfs (no etc/, usr/ or bin/ at any of the likely levels)"
+        echo "  root of the tarball: ${KSRC#$KSTAGE/}"
+        echo "  staged $(sudo du -sh "$KSRC" | cut -f1)"
+
+        # Recursive merge into DarkMatter's own rootfs.
+        #
+        # This is the NetHunter Lite trick -- let the two trees share one
+        # filesystem instead of boxing Kali away -- applied to the full Pro
+        # rootfs so the result is a real Linux userland and not a chroot.
+        #
+        # Merging directory-by-directory is what makes it work.  At the top
+        # level the names collide almost everywhere (bin, lib, etc, usr), but
+        # the *files* mostly do not:
+        #
+        #   Android /system/bin   toybox, sh, logcat
+        #   Kali    /bin          bash, nmap, apt, python3      <- no collision
+        #   Android /system/lib   libc.so      (bionic)
+        #   Kali    /lib/x86_64-linux-gnu/libc.so.6 (glibc)     <- no collision
+        #
+        # So merge every directory and only step in where a single path is
+        # really claimed twice.  A colliding Kali file keeps its whole path
+        # under /kali-keep/, so nothing is ever silently dropped and nothing
+        # ever overwrites Android -- the one outcome that cannot be undone on a
+        # flashed system is a bionic libc replaced by glibc.
+        KEEP="$SYS/kali-keep"
+        sudo mkdir -p "$KEEP"
+
+        # Record Android's existing paths FIRST.  Checking afterwards is
+        # useless: once rsync has run, every Kali path exists, so everything
+        # looks like a collision and nothing is reported as merged.
+        ( cd "$SYS" && find . -path ./kali-keep -prune -o -print ) \
+            | sed 's|^\./||' | sort > "$WORK/android.before"
+
+        # 1. Everything that does not collide goes straight into the tree.
+        #    --ignore-existing never replaces a path that already exists, which
+        #    is the whole safety property; it still descends into directories
+        #    that exist on both sides (verified: src/lib/k.so lands in dst/lib
+        #    while dst/lib/a.so keeps its own contents).
+        sudo rsync -a --ignore-existing \
+            --exclude '/dev/' --exclude '/proc/' --exclude '/sys/' \
+            --exclude '/run/' --exclude '/tmp/' --exclude '/lost+found/' \
+            --exclude '/.dockerenv' --exclude '/etc/mtab' \
+            "$KSRC/" "$SYS/"
+
+        # 2. Find what rsync refused, and keep it verbatim under /kali-keep.
+        #    A Kali path is a collision iff Android already had that exact path
+        #    before the merge.  Only files are stashed -- a shared directory is
+        #    not a conflict, it is the merge point.
+        ( cd "$KSRC" && find . -path ./dev -prune -o -path ./proc -prune \
+              -o -path ./sys -prune -o -path ./run -prune -o -path ./tmp -prune \
+              -o -path ./lost+found -prune -o -type f -print ) \
+            | sed 's|^\./||' | sort > "$WORK/kali.files"
+        n_total=$(wc -l < "$WORK/kali.files")
+        n_collide=0
+        while IFS= read -r rel; do
+            grep -qxF "$rel" "$WORK/android.before" || continue
+            sudo mkdir -p "$KEEP/$(dirname "$rel")"
+            sudo cp -a "$KSRC/$rel" "$KEEP/$rel"
+            n_collide=$(( n_collide + 1 ))
+        done < "$WORK/kali.files"
+        echo "  Kali files:     $n_total total"
+        echo "  merged in place: $(( n_total - n_collide ))"
+        echo "  kept under /kali-keep: $n_collide (Android already owned that path)"
+
+        # 3. Report the collisions that actually matter -- a replaced libc or
+        #    linker would break Android, so surface those by name rather than
+        #    leaving the operator to discover it at boot.
+        sudo find "$KEEP" -type f \( -name 'libc.so*' -o -name 'ld-*.so*' \
+             -o -name 'libstdc++*' -o -name 'libgcc_s*' \) 2>/dev/null \
+            | sed "s|^$KEEP|  |" | sed 's|^  /|  /kali-keep/|' | head -5
+
+        # 4. Kali's own view of the tree.  Without this, /etc/apt, /usr/bin and
+        #    friends resolve into Android's paths -- which is exactly the split
+        #    that makes a merged rootfs unreliable.  A profile.d entry puts the
+        #    Kali copies first and points PATH at them, so a Kali shell sees a
+        #    Debian layout while Android's own processes are unaffected.
+        if [ -d "$SYS/etc" ]; then
+            sudo mkdir -p "$SYS/etc/profile.d"
+            sudo tee "$SYS/etc/profile.d/10-kali-nethunter.sh" >/dev/null <<'KPROF'
+# Kali NetHunter Pro is merged into this same rootfs.  Paths Android also
+# claimed were preserved under /kali-keep, so a Kali shell prefers them.
+for d in /kali-keep/bin /kali-keep/sbin /kali-keep/usr/bin /kali-keep/usr/sbin; do
+    [ -d "$d" ] && PATH="$d:$PATH"
+done
+export PATH
+[ -d /kali-keep/usr/share/man ] && MANPATH="/kali-keep/usr/share/man:${MANPATH:-}"
+export MANPATH
+KPROF
+            echo "  /etc/profile.d/10-kali-nethunter.sh written"
+        fi
+
+        rm -f "$WORK/kali.files" "$WORK/android.before"
+        sudo rm -rf "$KSTAGE"
     elif [ -d "$GH_DIR/nh-unpacked/rootfs/kali-amd64" ]; then
-        sudo mkdir -p "$ISO_ROOT/nhpro"
-        sudo tar -czf "$ISO_ROOT/nhpro/kalifs-amd64.tar.gz" \
-             -C "$GH_DIR/nh-unpacked/rootfs" kali-amd64
-        KALI_NAME=kalifs-amd64.tar.gz
-        echo "  rootfs archived from nh-unpacked/rootfs/kali-amd64"
+        note "Merging the Kali rootfs (from nh-unpacked) into the system tree"
+        KSRC="$GH_DIR/nh-unpacked/rootfs/kali-amd64"
+        sudo mkdir -p "$SYS/kali"
+        for d in usr var opt srv home root run boot tmp; do
+            [ -e "$KSRC/$d" ] || continue
+            sudo cp -a "$KSRC/$d" "$SYS/$d" 2>/dev/null || sudo rsync -a "$KSRC/$d/" "$SYS/$d/"
+        done
+        for d in bin sbin lib lib64 lib32 media system vendor etc app priv-app framework fonts xbin; do
+            [ -e "$KSRC/$d" ] || continue
+            [ -e "$SYS/$d" ] && sudo cp -a "$KSRC/$d" "$SYS/kali/$d" || sudo cp -a "$KSRC/$d" "$SYS/$d"
+        done
+        echo "  kali tree merged from $KSRC"
     else
         echo "  warning: no Kali rootfs found (pass --kalifs)"
     fi
 
-    # --- first-boot extraction + module script ---
-    # Both dirs must exist before tee runs; the Kali block above only creates
-    # /system/etc/nethunter when it actually found a rootfs.
-    sudo mkdir -p "$SYS/etc/init" "$SYS/etc/nethunter"
-    sudo tee "$SYS/etc/init/nethunter.rc" >/dev/null <<'EOF'
-on property:sys.boot_completed=1
-    mkdir /data/local/nhsystem 0770 root root
-    exec - root root -- /system/bin/sh /system/etc/nethunter/nh-firstboot.sh
-EOF
-    sudo tee "$SYS/etc/nethunter/nh-firstboot.sh" >/dev/null <<'EOF'
-#!/system/bin/sh
-# Extract the Kali chroot once, then run the NetHunter Magisk-module logic
-# that would normally be driven by the Magisk daemon.
-LOG=/data/local/tmp/nethunter-firstboot.log
-exec >>"$LOG" 2>&1
-echo "--- nethunter firstboot $(date)"
+    # --- NetHunter module scripts ---------------------------------------------
+    #
+    # There is deliberately NO first-boot rootfs extraction and NO
+    # nethunter.rc chroot hook here.  Earlier revisions of this script shipped
+    # the Kali tarball inside /system and expanded it into
+    # /data/local/nhsystem at first boot, which is exactly the NetHunter Lite
+    # model -- a second user space behind a chroot.  The Kali tree is merged
+    # into this rootfs above instead, so by the time the ISO is built there is
+    # one filesystem and nothing left to unpack.  The hook is actively removed
+    # so an older tree cannot reintroduce it.
+    sudo rm -f "$SYS/etc/init/nethunter.rc" "$SYS/etc/nethunter/nh-firstboot.sh"
+    if [ -f "$SYS/etc/nethunter/nh-firstboot.sh" ]; then
+        die "could not remove the old first-boot chroot hook"
+    fi
 
-if [ ! -d /data/local/nhsystem/kali-amd64 ]; then
-    # The rootfs ships at the top of the ISO and the installer copies it to
-    # /nhpro on the target; on a live boot it is read straight off the CD.
-    for f in /nhpro/kalifs-amd64.tar.* /system/etc/nethunter/kalifs-amd64.tar.*; do
-        [ -f "$f" ] || continue
-        echo "extracting $(basename "$f")"
-        # Android ships toybox tar, which handles gzip but not always xz, and
-        # the Kali rootfs is .tar.xz.  Try a direct extract first, then fall
-        # back to decompressing to a pipe.
-        if tar -xf "$f" -C /data/local/nhsystem/ 2>/dev/null; then
-            break
-        fi
-        case "$f" in
-            *.xz)  busybox xz -dc "$f" | tar -x -C /data/local/nhsystem/ && break ;;
-            *.gz)  busybox gzip -dc "$f" | tar -x -C /data/local/nhsystem/ && break ;;
-            *.zst) busybox zstd -dc "$f" | tar -x -C /data/local/nhsystem/ && break ;;
-        esac
-        echo "  could not extract $f"
-    done
-fi
-
-if [ -d /data/local/nhsystem/kali-amd64/etc ]; then
-    echo "rootfs present"
-    [ -d /data/local/nhsystem/kali-amd64/dev ]     || mkdir -p /data/local/nhsystem/kali-amd64/dev
-    [ -d /data/local/nhsystem/kali-amd64/proc ]    || mkdir -p /data/local/nhsystem/kali-amd64/proc
-    [ -d /data/local/nhsystem/kali-amd64/sys ]     || mkdir -p /data/local/nhsystem/kali-amd64/sys
-fi
-echo "--- done"
-EOF
-    sudo chmod 0755 "$SYS/etc/nethunter/nh-firstboot.sh"
+    # Keep the module's own boot scripts, which are plain shell run from
+    # /system/etc/nethunter -- they set properties and start services in the
+    # one user space and do not chroot anything.
+    if [ -d "$SYS/etc/nethunter" ]; then
+        chmod_probe=$(sudo find "$SYS/etc/nethunter" -maxdepth 1 -name '*.sh' | wc -l)
+        echo "  /system/etc/nethunter: $chmod_probe module script(s), no chroot hook"
+    fi
 
     # --- repack ---------------------------------------------------------------
     #
@@ -573,15 +694,31 @@ EOF
     # input form (wrapper, bare image, directory).  Use it rather than assuming
     # $WORK/sysroot: on a directory input that path does not exist.
     ROOT="$SYS"
-    [ -d "$ROOT/system" ] && ROOT="$ROOT/system"
+    # Descend only when SYS is a *container* (an extracted android root that
+    # holds system/ inside it).  If it already looks like a system root, the
+    # presence of a system/ subdirectory is not a reason to descend -- Kali's
+    # tarball has a top-level system/ and this used to land us in
+    # <sysroot>/system/system, which then failed the payload check.
+    is_sysroot=0
+    for marker in build.prop bin framework lib; do
+        [ -e "$ROOT/$marker" ] && { is_sysroot=1; break; }
+    done
+    if [ "$is_sysroot" -eq 0 ] && [ -d "$ROOT/system" ]; then
+        ROOT="$ROOT/system"
+    fi
 
     used_kb=$(sudo du -sk "$ROOT" | cut -f1)
     # Say where the weight is.  A surprise here usually means modules with
     # debug info or a duplicate payload, and it is much cheaper to see it than
     # to work it out from the final image size.
     echo "  largest directories in the payload:"
-    sudo du -sk "$ROOT"/* 2>/dev/null | sort -rn | head -6 \
-        | awk '{printf "    %8s  %s\n", $1/1024 "M", $2}'
+    # sort writes into head, and if head exits first sort takes SIGPIPE; under
+    # set -o pipefail that kills the whole script with no message.  Collect
+    # first, then print.
+    top=$(sudo du -sk "$ROOT"/* 2>/dev/null | sort -rn | sed -n '1,6p' || true)
+    if [ -n "$top" ]; then
+        printf '%s\n' "$top" | awk '{printf "    %8s  %s\n", $1/1024 "M", $2}'
+    fi
     echo "  payload: $(numfmt --to=iec $((used_kb*1024)))"
 
     # Replace the two-layer image with a directory.  Removing the old
@@ -600,8 +737,14 @@ EOF
     # The installer does `chown 0.0 *` itself, but the tree must ship with
     # root-owned paths and sane modes or a live boot gets a mismatched system.
     echo "  system/: $(find "$mv_to" | wc -l) paths, $(du -sh "$mv_to" | cut -f1)"
-    for must in bin build.prop etc framework lib priv-app; do
+    # Only the markers every Android system tree has.  priv-app, framework and
+    # lib64 are common but not universal, and a false failure here is worse
+    # than a soft warning: it blocks a perfectly good tree.
+    for must in bin etc build.prop; do
         [ -e "$mv_to/$must" ] || die "system/$must is missing -- this is not an Android system tree"
+    done
+    for nice in framework lib lib64 priv-app vendor; do
+        [ -e "$mv_to/$nice" ] || echo "  note: system/$nice absent"
     done
     # Android needs lib, lib64 and vendor reachable at the top level too; the
     # base image keeps vendor inside system/, so nothing extra to place there.
@@ -611,84 +754,21 @@ EOF
 fi
 
 # ------------------------------------------------------------------------------
-# 4b. Teach the installer to carry the Kali rootfs
+# 4b. The installer needs no patch
 # ------------------------------------------------------------------------------
-# install.img is a gzipped cpio of the android-x86 installer.  Its 1-install
-# script copies a fixed list of paths from the CD onto the target:
+# install.img copies a fixed list of paths from the CD to the target, including
+# $sysimg, which on ext4 is "android/system" -- a directory.  Because the Kali
+# tree is merged into that directory at build time, the stock installer already
+# carries the whole unified OS with no change.  That is the point of doing the
+# merge here rather than staging a tarball for the target to unpack.
 #
-#   files="mnt/$SRC/kernel mnt/$SRC/gearlock ... $sysimg"
-#   ( cd /; find $files | cpio -H newc -o ) | ( cpio -iud )
-#
-# $sysimg is "android/system" on ext4 -- a directory -- so the monolithic tree
-# we just wrote installs natively with no change.  Only /nhpro is unknown to
-# it, and a file it does not list is a file that never reaches the disk.  Add
-# it to that list so the rootfs is installed in the same pass as the system,
-# and so the space check counts it.
-if [ -f "$ISO_ROOT/install.img" ] && [ -d "$ISO_ROOT/nhpro" ]; then
-    note "Patching the installer to carry /nhpro"
-    IPATCH="$WORK/install-patch"
-    # sudo: the tree below is unpacked root-owned (the archive is root:root),
-    # so an unprivileged rm leaves it behind and the next run reuses a
-    # half-patched copy.
-    sudo rm -rf "$IPATCH"; mkdir -p "$IPATCH"
-    # umask 000 and root ownership matter even here: the installer runs as
-    # root and executes these scripts, and a rebuild under the normal umask
-    # drops the execute bits (verified: 775 dirs came back 755, and a file
-    # list diff that looked clean still had 0775 -> 0755 everywhere).
-    ( cd "$IPATCH" && umask 000 && zcat "$ISO_ROOT/install.img" | sudo cpio -idmu --quiet )
-    SCRIPT="$IPATCH/scripts/1-install"
-    [ -f "$SCRIPT" ] || die "install.img has no scripts/1-install -- unexpected layout"
-
-    if grep -q '\$SRC/nhpro' "$SCRIPT"; then
-        echo "  already patched"
-    else
-        # Anchor on the unchanged file-list line rather than a line number, and
-        # fail loudly if the base ISO ever moves it.
-        grep -q 'files="mnt/\$SRC/kernel' "$SCRIPT" \
-            || die "cannot find the installer file list; refusing to guess"
-
-        # 1. Add /nhpro to the copy list.  Done in python, not sed: the pattern
-        # needs a quote and two backslashes inside a shell string, and getting
-        # that wrong silently patches nothing.
-        sudo python3 - "$SCRIPT" <<'PATCH'
-import re, sys
-p = sys.argv[1]
-s = open(p).read()
-s2 = re.sub(r'(files="mnt/\$SRC/kernel[^"]*)"', r'\1 mnt/$SRC/nhpro"', s, count=1)
-if s2 == s:
-    sys.exit("the installer file list did not match")
-open(p, "w").write(s2)
-PATCH
-
-        # 2. The Install menu's own idea of required space is 4-8 GB, which is
-        # fine for Android alone and far too small with an expanded Kali tree
-        # next to it.  Say so where the user picks a partition.
-        sudo sed -i 's#Recommended minimum free space - 4GB  |  Optimum free space >= 8GB#Recommended minimum free space - 16GB  |  Optimum free space >= 32GB (Android system + Kali NetHunter Pro rootfs)#' "$SCRIPT" 2>/dev/null || true
-
-        grep -q '\$SRC/nhpro' "$SCRIPT" \
-            || die "the installer patch did not take -- /nhpro would not be installed"
-        echo "  /nhpro added to the installer's copy list"
-    fi
-
-    # Repack it the way it arrived: gzipped newc cpio, root-owned, at the same
-    # path the initrd extracts it from.
-    # --owner=0:0 so the archive says root:root regardless of how it was
-    # unpacked; the original install.img is root-owned and the initrd extracts
-    # it as root before running anything.
-    ( cd "$IPATCH" && find . -print0 \
-        | sudo cpio --null -o -H newc --quiet --owner=0:0 ) \
-        | gzip -9 > "$WORK/install.img.new"
-    rm -f "$ISO_ROOT/install.img"
-    cp -f "$WORK/install.img.new" "$ISO_ROOT/install.img"
-    sudo rm -rf "$IPATCH"; rm -f "$WORK/install.img.new"
-
-    # Prove it round-trips before it goes in the ISO.
-    zcat "$ISO_ROOT/install.img" | cpio -t --quiet 2>/dev/null | grep -qx 'scripts/1-install' \
-        || die "rebuilt install.img is not readable"
-    echo "  install.img rebuilt ($(stat -c %s "$ISO_ROOT/install.img") bytes)"
-else
-    [ -d "$ISO_ROOT/nhpro" ] || echo "  note: no /nhpro -- installer needs no patch"
+# (An earlier revision patched 1-install to copy a top-level /nhpro.  That was
+# for the staged-tarball model and is gone with it.)
+if [ -d "$ISO_ROOT/nhpro" ]; then
+    echo "  warning: /nhpro still present from an older run -- removing"
+    rm -rf "$ISO_ROOT/nhpro"
 fi
+echo "  installer untouched: system/ is copied natively"
 
 # ------------------------------------------------------------------------------
 # 5. ISO
