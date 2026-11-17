@@ -2,18 +2,18 @@ name: NUKI Toolchain + Environment
 on:
   workflow_call:
     inputs:
-      device_codename: AR-Nuki-genevn
+      device_codename:"genevn"
       type: string      
-      required: true
+      required: "true"
       kernel_branch:
         type: string
-        required: true
+        required: "true"
 
 jobs:
   toolchain:
     name: Setup Toolchain
     runs-on: ubuntu-22.04
-    timeout-minutes: 20
+    timeout-minutes:
     env:
       ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
 
