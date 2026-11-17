@@ -55,6 +55,60 @@ CONFIG_CRYPTO_ZSTD=y
 CONFIG_CRYPTO_842=y
 CONFIG_KERNEL_ZSTD=y
 
+# ------------------------------------------------------------------- KVM --
+# Host-side virtualization, so DroidVM (crosvm/QEMU) can start a guest.
+#
+# x86_64_defconfig leaves KVM off, which is why the first dark-hunter kernel
+# reported "# CONFIG_KVM is not set": the app installed and launched but had no
+# /dev/kvm to attach to.
+#
+# Built in (=y), not modular.  The fuse reports "no modules staged -- the base
+# 4.14 modules will never load", so a KVM=m would sit on disk unused and the
+# failure would look like a broken app rather than a missing kernel feature.
+#
+# KVM_INTEL and KVM_AMD are both built in: the desktop target is the AMD
+# Mendocino Vivobook, but the same image boots on Intel, and the vendor module
+# only probes a matching CPU.
+CONFIG_VIRTUALIZATION=y
+CONFIG_KVM=y
+CONFIG_KVM_COMMON=y
+CONFIG_KVM_INTEL=y
+CONFIG_KVM_AMD=y
+CONFIG_KVM_AMD_SEV=y
+
+# vhost + virtio back ends: a guest needs a disk and a NIC, and crosvm drives
+# both through vhost rather than emulating them in user space.
+CONFIG_VHOST=y
+CONFIG_VHOST_NET=y
+CONFIG_VHOST_VSOCK=y
+CONFIG_VHOST_SCSI=y
+# CONFIG_TUN is already enabled for the NetHunter bridge, further down.
+CONFIG_VIRTIO=y
+CONFIG_VIRTIO_PCI=y
+CONFIG_VIRTIO_MMIO=y
+CONFIG_VIRTIO_NET=y
+CONFIG_VIRTIO_BLK=y
+CONFIG_VIRTIO_CONSOLE=y
+CONFIG_HW_RANDOM_VIRTIO=y
+CONFIG_VSOCKETS=y
+CONFIG_VSOCKETS_DIAG=y
+
+# ------------------------------------------------------------ livepatch --
+# kpatch (015stray91/kpatch_1) builds runtime livepatches: apply a fix to the
+# running kernel without a reboot.  It needs three things that x86_64_defconfig
+# does not turn on, and the first dark-hunter kernel had none of them, so a
+# livepatch would have built but refused to load.
+#
+# FUNCTION_TRACER + DYNAMIC_FTRACE are what kpatch actually hooks; LIVEPATCH is
+# the core that registers the patched functions.  All three are built in because
+# the fuse reports that staged modules never load on this image.
+CONFIG_LIVEPATCH=y
+CONFIG_FUNCTION_TRACER=y
+CONFIG_DYNAMIC_FTRACE=y
+CONFIG_FTRACE=y
+CONFIG_FUNCTION_GRAPH_TRACER=y
+# CONFIG_KALLSYMS_ALL is already set further down (debug section).
+
 # --------------------------------------------------------------- overlayfs --
 CONFIG_OVERLAY_FS=m
 CONFIG_OVERLAY_FS_REDIRECT_ALWAYS_FOLLOW=y
