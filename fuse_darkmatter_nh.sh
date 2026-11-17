@@ -136,7 +136,10 @@ WORK="$OUT_DIR/work"
 ISO_ROOT="$OUT_DIR/iso"
 MNT="$WORK/mnt"
 
-rm -rf "$WORK" "$ISO_ROOT"
+# sudo, because a previous run on the same volume leaves these root-owned
+# (the fused tree is assembled with sudo), and `rm -rf` as the CI user cannot
+# unlink inside a root-owned directory.  Cleanup already does this.
+sudo rm -rf "$WORK" "$ISO_ROOT" 2>/dev/null || rm -rf "$WORK" "$ISO_ROOT"
 mkdir -p "$MNT" "$ISO_ROOT"
 
 cleanup() {
