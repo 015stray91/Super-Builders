@@ -33,6 +33,10 @@ on:
         description: 'Install the NetHunter/NetHunterKeX APKs into /system/priv-app'
         type: boolean
         default: true
+      prebake_app:
+        description: 'Pre-bake the AnyRealm Builder APK into the image, so the builder is present on first boot'
+        type: boolean
+        default: true
   push:
     branches: [015stray91]
     paths:
@@ -69,6 +73,15 @@ jobs:
     # grow.
     runs-on: [self-hosted, anyrealm-vm]
     timeout-minutes: 180
+
+    # These default to true, and on a push there are no inputs at all -- so
+    # `inputs.fuse_rootfs` is empty there and every gated step silently skips.
+    # That is what published a "dark-hunter" ISO with no NetHunter rootfs and no
+    # APKs while reporting success. Resolve once, here, for either trigger.
+    env:
+      FUSE_ROOTFS: ${{ github.event_name != 'workflow_dispatch' || inputs.fuse_rootfs }}
+      FUSE_APKS: ${{ github.event_name != 'workflow_dispatch' || inputs.fuse_apks }}
+      PREBAKE_APP: ${{ github.event_name != 'workflow_dispatch' || inputs.prebake_app }}
 
     steps:
       - name: Report disk and pick a work volume
@@ -216,7 +229,7 @@ jobs:
           done
 
       - name: Fetch the NetHunter installer zip
-        if: ${{ inputs.fuse_rootfs || inputs.fuse_apks }}
+        if: env.FUSE_ROOTFS == 'true' || env.FUSE_APKS == 'true'
         run: |
           set -euo pipefail
           curl -fL --retry 3 -o "$WORK/nh.zip" "${NH_ZIP}"
@@ -226,7 +239,7 @@ jobs:
           unzip -l "$WORK/nh.zip" | grep -E 'apk|kalifs' || true
 
       - name: Extract the Kali rootfs
-        if: ${{ inputs.fuse_rootfs }}
+        if: env.FUSE_ROOTFS == 'true'
         run: |
           set -euo pipefail
           # One member of the installer zip; same bytes as the standalone
@@ -238,7 +251,7 @@ jobs:
           echo "rootfs archive verified"
 
       - name: Extract the NetHunter APKs
-        if: ${{ inputs.fuse_apks }}
+        if: env.FUSE_APKS == 'true'
         run: |
           set -euo pipefail
           mkdir -p "$WORK/apks"
@@ -255,10 +268,40 @@ jobs:
           done
           echo "all APKs valid"
 
+      - name: Fetch the AnyRealm Builder APK to pre-bake
+        if: env.PREBAKE_APP == 'true'
+        id: builder
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # The builder APK is built by the AnyRealm repo, not this one, so it is
+          # fetched from that repo's latest successful Build APK run.  Baking it
+          # in means the image ships with the builder already installed: first
+          # boot has the tool that composed it, rather than the user side-loading
+          # it from a release page.
+          SRC_REPO="${BUILDER_REPO:-015stray91/ANYREALM-}"
+          RID=$(gh api "repos/$SRC_REPO/actions/workflows/build-apk.yml/runs?status=success&per_page=1" \
+                  --jq '.workflow_runs[0].id')
+          [ -n "$RID" ] && [ "$RID" != "null" ] \
+            || { echo "::warning::no successful Build APK run to pre-bake from"; exit 0; }
+          echo "builder apk from $SRC_REPO run $RID"
+          mkdir -p "$WORK/builder"
+          gh run download "$RID" -R "$SRC_REPO" -n anyrealm-builder-apk -D "$WORK/builder"
+          APK=$(find "$WORK/builder" -name '*.apk' -type f -print -quit)
+          [ -n "$APK" ] || { echo "::warning::APK artefact had no .apk inside"; exit 0; }
+          # An APK is a zip; prove it is not an error page before it goes into the
+          # image, where a bad file would only surface as a failed install.
+          unzip -l "$APK" >/dev/null || { echo "::error::$APK is not a valid APK"; exit 1; }
+          mkdir -p "$WORK/apks"
+          cp -f "$APK" "$WORK/apks/anyrealm-builder.apk"
+          ls -lh "$WORK/apks/anyrealm-builder.apk"
+          echo "baked=true" >> "$GITHUB_OUTPUT"
+
       - name: Fuse
         env:
-          FUSE_ROOTFS: ${{ inputs.fuse_rootfs }}
-          FUSE_APKS: ${{ inputs.fuse_apks }}
+          FUSE_ROOTFS: ${{ env.FUSE_ROOTFS }}
+          FUSE_APKS: ${{ env.FUSE_APKS }}
         run: |
           set -euo pipefail
           # --base-iso, not --gh: the ISO is the authority.  A loose tree can
@@ -310,8 +353,9 @@ jobs:
             echo "bytes:  $(stat -c %s "$ISO")"
             echo "sha256: $(sha256sum "$ISO" | cut -d' ' -f1)"
             echo "kernel: run ${{ steps.kern.outputs.run_id }}"
-            echo "rootfs: $([ "${{ inputs.fuse_rootfs }}" = "true" ] && echo included || echo omitted)"
-            echo "apks:   $([ "${{ inputs.fuse_apks }}" = "true" ] && echo included || echo omitted)"
+            echo "rootfs: $([ "$FUSE_ROOTFS" = "true" ] && echo included || echo omitted)"
+            echo "apks:   $([ "$FUSE_APKS" = "true" ] && echo included || echo omitted)"
+            echo "builder:$([ "$PREBAKE_APP" = "true" ] && echo baked || echo omitted)"
             echo "built:  $(date -u +%FT%TZ)"
           } | tee $WORK/out/ISO-INFO.txt
 
