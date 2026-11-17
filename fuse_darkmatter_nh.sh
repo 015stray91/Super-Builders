@@ -317,9 +317,18 @@ MODS="$WORK/modules"
 mkdir -p "$MODS"
 if [ -n "$KERNEL_DIR" ]; then
     for cand in "$KERNEL_DIR/modules/lib/modules" "$KERNEL_DIR/lib/modules" "$KERNEL_DIR/modules"; do
-        [ -d "$cand" ] && { rsync -a "$cand/" "$MODS/"; break; }
+        [ -d "$cand" ] && { rsync -a --exclude 'build/' --exclude 'source/' "$cand/" "$MODS/"; break; }
     done
-    echo "  $(find "$MODS" -name '*.ko' 2>/dev/null | wc -l) .ko files"
+    # build/ and source/ are the kernel's own build tree copied in by
+    # modules_install.  Nothing at boot reads them -- they exist so out-of-tree
+    # modules can compile -- and in the last image they were 5.9 GiB of the
+    # 18.9 GB total, against 94 MiB of actual .ko files.  Excluded above; this
+    # also clears any copy a previous run left behind.
+    for d in "$MODS"/*/; do
+        [ -d "$d" ] || continue
+        rm -rf "$d/build" "$d/source" 2>/dev/null || true
+    done
+    echo "  $(find "$MODS" -name '*.ko' 2>/dev/null | wc -l) .ko files, $(du -sh "$MODS" 2>/dev/null | cut -f1) staged"
 else
     echo "  none"
 fi
@@ -450,6 +459,15 @@ else
         fi
         sudo rsync -a "$MODS/" "$SYS/lib/modules/"
         echo "  modules -> /system/lib/modules: $(find "$SYS/lib/modules" -name '*.ko*' | wc -l) files"
+        if [ -d "$SYS/lib/modules" ]; then
+            kb=$(sudo du -sm "$SYS/lib/modules" 2>/dev/null | cut -f1)
+            echo "  module tree: ${kb} MiB"
+            # 5.9 GiB of build/ is what bloated the last image; a tree this size
+            # means it came back.
+            if [ "${kb:-0}" -gt 1024 ]; then
+                echo "  warning: module tree is ${kb} MiB -- build/ may have crept back in"
+            fi
+        fi
         for d in "$SYS"/lib/modules/*/; do
             [ -d "$d" ] && echo "    $(basename "$d")"
         done

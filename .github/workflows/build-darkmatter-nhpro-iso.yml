@@ -169,6 +169,17 @@ jobs:
           mkdir -p $WORK/kdir
           cp "$V" $WORK/kdir/vmlinuz
           M=$(find $WORK/kern -type d -path '*lib/modules/*' -name '6.12*' -print -quit)
+          # modules_install copies the kernel's build tree next to the modules as
+          # a real directory when INSTALL_MOD_PATH is a scratch path.  Boot never
+          # reads it, and it is what made the last ISO 18.9 GB instead of ~13.
+          if [ -n "$M" ]; then
+            for sub in build source; do
+              if [ -d "$M/$sub" ]; then
+                echo "dropping $sub/ from the module tree: $(du -sh "$M/$sub" | cut -f1)"
+                rm -rf "$M/$sub"
+              fi
+            done
+          fi
           # modules_install writes lib/modules/<release>/, so the tree name is the
           # release and not a fixed string.  Report it when found.
           [ -z "$M" ] || echo "modules: $M"
@@ -327,6 +338,35 @@ jobs:
           ls -lh "$WORK/apks/anyrealm-builder.apk"
           echo "baked=true" >> "$GITHUB_OUTPUT"
 
+      - name: Fetch device firmware
+        run: |
+          set -euo pipefail
+          # firmware-nonfree 20261019-1.  Pinned by version and verified by size,
+          # because this is what makes the GPU and the Wi-Fi card work at all:
+          # a .ko that loads without its microcode is a dead device.
+          #
+          #   firmware-amd-graphics   gc_11/psp_13/dcn_3 blobs for Mendocino
+          #   firmware-realtek        rtw88/rtw8821c_* for the 8821CE
+          #   firmware-misc-nonfree   everything else on the board
+          mkdir -p "$WORK/firmware"
+          base=https://deb.debian.org/debian/pool/non-free-firmware/f/firmware-nonfree
+          declare -A want=(
+            [firmware-amd-graphics]=16549228
+            [firmware-realtek]=4250048
+            [firmware-misc-nonfree]=6584904
+          )
+          for pkg in firmware-amd-graphics firmware-realtek firmware-misc-nonfree; do
+            deb="$WORK/firmware/${pkg}_20261019-1_all.deb"
+            curl -fsSL -o "$deb" "$base/${pkg}_20261019-1_all.deb"
+            got=$(stat -c%s "$deb")
+            if [ "$got" != "${want[$pkg]}" ]; then
+              echo "::error::$pkg is $got bytes, expected ${want[$pkg]}"
+              exit 1
+            fi
+            dpkg-deb -I "$deb" >/dev/null || { echo "::error::$pkg is not a deb"; exit 1; }
+            echo "  $pkg: $got bytes, $(dpkg-deb -f "$deb" Version)"
+          done
+
       - name: Fuse
         env:
           FUSE_ROOTFS: ${{ env.FUSE_ROOTFS }}
@@ -341,6 +381,9 @@ jobs:
             --kernel-dir $WORK/kdir
             --out $WORK/out
             --name "dark-hunter.iso"
+            --firmware "$WORK/firmware/firmware-amd-graphics_20261019-1_all.deb"
+            --firmware "$WORK/firmware/firmware-realtek_20261019-1_all.deb"
+            --firmware "$WORK/firmware/firmware-misc-nonfree_20261019-1_all.deb"
           )
           # if/then, not `[ ... ] && args+=(...)`: under set -e a false test
           # makes the whole && expression return 1 and kills the step.
