@@ -285,9 +285,12 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: darkmatter-nhpro-iso-x86_64
+          # Relative to the workspace.  $WORK is a shell variable and is NOT
+          # expanded in a `with:` block -- the first attempt silently uploaded
+          # nothing ("No files were found with the provided path: $WORK/...").
           path: |
-            $WORK/out/DarkMatter-NetHunter-KSU-6.12-amd64.iso
-            $WORK/out/ISO-INFO.txt
+            build/out/DarkMatter-NetHunter-KSU-6.12-amd64.iso
+            build/out/ISO-INFO.txt
           compression-level: 0
           if-no-files-found: error
           retention-days: 7
