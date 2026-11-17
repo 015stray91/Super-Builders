@@ -581,7 +581,10 @@ else
         # Record Android's existing paths FIRST.  Checking afterwards is
         # useless: once rsync has run, every Kali path exists, so everything
         # looks like a collision and nothing is reported as merged.
-        ( cd "$SYS" && find . -path ./kali-keep -prune -o -print ) \
+        # sudo on the find, not the pipeline: the system tree was extracted as
+        # root, so an unprivileged walk dies on the first 0700 directory and
+        # `set -e` turns that into a failed fuse *after* an 11 GB stage.
+        ( cd "$SYS" && sudo find . -path ./kali-keep -prune -o -print ) \
             | sed 's|^\./||' | sort > "$WORK/android.before"
 
         # 1. Everything that does not collide goes straight into the tree.
@@ -599,7 +602,7 @@ else
         #    A Kali path is a collision iff Android already had that exact path
         #    before the merge.  Only files are stashed -- a shared directory is
         #    not a conflict, it is the merge point.
-        ( cd "$KSRC" && find . -path ./dev -prune -o -path ./proc -prune \
+        ( cd "$KSRC" && sudo find . -path ./dev -prune -o -path ./proc -prune \
               -o -path ./sys -prune -o -path ./run -prune -o -path ./tmp -prune \
               -o -path ./lost+found -prune -o -type f -print ) \
             | sed 's|^\./||' | sort > "$WORK/kali.files"
