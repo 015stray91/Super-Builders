@@ -322,9 +322,13 @@ jobs:
           # Relative to the workspace.  $WORK is a shell variable and is NOT
           # expanded in a `with:` block -- the first attempt silently uploaded
           # nothing ("No files were found with the provided path: $WORK/...").
+          # Absolute, because WORK is an absolute path outside the checkout on
+          # this VM.  A relative build/out/... resolved under the workspace and
+          # the upload failed with "No files were found" *after* a successful
+          # fuse, discarding a finished 1.9 GB image.
           path: |
-            build/out/dark-hunter.iso
-            build/out/ISO-INFO.txt
+            /mnt/anyrealm/scratch/iso/out/dark-hunter.iso
+            /mnt/anyrealm/scratch/iso/out/ISO-INFO.txt
           compression-level: 0
           if-no-files-found: error
           retention-days: 7
