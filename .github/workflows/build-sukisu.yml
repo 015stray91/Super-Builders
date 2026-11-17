@@ -141,17 +141,11 @@ jobs:
         KERNEL_VER: ${{ inputs.kernel_version }}
         OS_PATCH: ${{ inputs.os_patch_level }}
       run: |
-        FORMATTED_BRANCH="${ANDROID_VER}-${KERNEL_VER}-${OS_PATCH}"
-
-        repo init -u https://android.googlesource.com/kernel/manifest \
-          -b "common-${FORMATTED_BRANCH}" --depth=1
-
-        REMOTE_BRANCH=$(git ls-remote https://android.googlesource.com/kernel/common "${FORMATTED_BRANCH}")
-        if grep -q deprecated <<< "$REMOTE_BRANCH"; then
-          sed -i "s/\"${FORMATTED_BRANCH}\"/\"deprecated\/${FORMATTED_BRANCH}\"/g" .repo/manifests/default.xml
-        fi
-
-        repo --trace sync -c -j$(nproc --all) --fail-fast --no-tags --force-sync --no-clone-bundle
+        # Sublevel is not addressable through the manifest: branches are named
+        # by month, tags are named by sublevel. sync-gki-source.sh syncs the
+        # month branch, then checks out the tag the requested sublevel names.
+        bash "$GITHUB_WORKSPACE/$VERSION_DIR/build-helpers/sync-gki-source.sh" \
+          "$KERNEL_ROOT" "$ANDROID_VER" "$KERNEL_VER" "${{ inputs.sub_level }}" "$OS_PATCH"
 
     - name: Extract Sublevel
       env:

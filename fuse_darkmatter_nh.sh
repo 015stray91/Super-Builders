@@ -754,6 +754,115 @@ KPROF
 fi
 
 # ------------------------------------------------------------------------------
+# 4c. SELinux: one policy, two libcs
+# ------------------------------------------------------------------------------
+# The kernel already runs bionic and glibc processes side by side -- it does not
+# care which libc a binary was linked against.  What decides whether the merged
+# rootfs is *usable* is labeling and domain, not libc support.
+#
+# Where the policy actually lives, verified against the base ISO:
+#
+#   ramdisk.img  ->  sepolicy (175 KB), file_contexts.bin, selinux_version
+#   system.img   ->  nothing.  No /sepolicy, no file_contexts, no selinux dir.
+#
+# selinux_version says Android-x86/android_x86_64/x86_64:7.1.1/NMF26O, and the
+# policy contains su_exec and su_tmpfs but no permissive or unconfined domain.
+# So the loaded policy is a real 7.1 Android policy, and it is loaded from the
+# ramdisk -- writing policy files into /system would do nothing at all on this
+# image, which is why this step verifies rather than assumes.
+#
+# Consequences that matter for a merged rootfs:
+#
+#   1. Android 7.1 policy has no CIL.  It is a binary policy (secilc output is
+#      not consulted by a 7.1 init), so there is no supported way to add a
+#      Kali domain by dropping a file next to it.  Pretending otherwise would
+#      ship a file nothing reads.
+#   2. The policy predates the merged tree, so every Kali path is unlabeled.
+#      Under enforcing that means denials, and under permissive it means the
+#      kernel logs them and continues -- which is exactly what is needed to
+#      bring up a merged system for the first time.
+#   3. su_exec already exists.  KernelSU-Next's su is the one domain in this
+#      policy designed to cross the Android/other boundary, so Kali processes
+#      are started from it rather than being given a new type that cannot be
+#      compiled in.
+#
+# Therefore: keep the image permissive while the merged tree is being proven,
+# and record precisely what to do when flipping to enforcing.
+if [ -d "$SYS" ] && [ "$NO_FUSE" -eq 0 ]; then
+    note "SELinux for the merged rootfs"
+
+    # Report what policy is actually present, from the ramdisk where it lives.
+    POL_FOUND=""
+    for cand in "$ISO_ROOT/ramdisk.img" "$ISO_ROOT/sepolicy"; do
+        [ -f "$cand" ] || continue
+        case "$cand" in
+            */ramdisk.img)
+                if zcat "$cand" 2>/dev/null | cpio -t --quiet 2>/dev/null | grep -qx 'sepolicy'; then
+                    POL_FOUND="$cand (inside the ramdisk)"
+                fi ;;
+            *) POL_FOUND="$cand" ;;
+        esac
+        [ -n "$POL_FOUND" ] && break
+    done
+    if [ -n "$POL_FOUND" ]; then
+        echo "  policy: $POL_FOUND"
+        echo "  note: a 7.1 binary policy -- it cannot take a CIL module, so the"
+        echo "        merged Kali tree runs under the domains already defined"
+    else
+        echo "  warning: no SELinux policy found; the kernel will run unconfined"
+    fi
+
+    # Make permissive explicit and reversible.  Not a silent disable: this is
+    # written as a property so it is visible in one place and one edit away
+    # from enforcing.
+    if [ -f "$SYS/build.prop" ]; then
+        if ! grep -q '^ro.boot.selinux=' "$SYS/build.prop" 2>/dev/null; then
+            echo 'ro.boot.selinux=permissive' | sudo tee -a "$SYS/build.prop" >/dev/null
+        fi
+        echo "  build.prop: ro.boot.selinux=permissive"
+    fi
+
+    # Record the enforcing roadmap where an operator will find it, not in a
+    # commit message nobody reads at 2am with a dead laptop.
+    sudo mkdir -p "$SYS/etc/nethunter"
+    sudo tee "$SYS/etc/nethunter/SELINUX.md" >/dev/null <<'SEMD'
+# SELinux on the unified rootfs
+
+The kernel runs bionic and glibc processes equally well; SELinux is the layer
+that has to be told both are legitimate.
+
+## Where the policy lives
+
+`ramdisk.img` holds `sepolicy`, `file_contexts.bin` and `selinux_version`
+(Android-x86 7.1.1). `/system` holds none of them. Editing /system policy files
+has no effect on this image.
+
+## Current state
+
+`ro.boot.selinux=permissive` is set in `/system/build.prop`. Denials are logged
+to dmesg and nothing is blocked, which is what lets a merged tree come up.
+
+## Going to enforcing
+
+1. Boot permissive and collect denials:
+   `dmesg | grep avc`
+2. Every denial against a Kali path (`/system/kali-keep/...`) is a missing
+   label. Android 7.1 policy has no CIL support, so the labels must be added to
+   the platform policy with the AOSP sepolicy toolchain for this policy
+   version -- not by dropping a file into /system.
+3. `su_exec` and `su_tmpfs` already exist. KernelSU-Next's su is the existing
+   domain meant to cross the Android boundary; run Kali processes from it
+   instead of inventing a type the policy cannot contain.
+4. Only then set `ro.boot.selinux=enforcing`.
+
+Do not disable SELinux to make the merge "work", and do not flatten labels to
+system_file. Both boot, and both throw away the separation that stops one
+compromised process owning the other userland.
+SEMD
+    echo "  /etc/nethunter/SELINUX.md written"
+fi
+
+# ------------------------------------------------------------------------------
 # 4b. The installer needs no patch
 # ------------------------------------------------------------------------------
 # install.img copies a fixed list of paths from the CD to the target, including
@@ -769,6 +878,123 @@ if [ -d "$ISO_ROOT/nhpro" ]; then
     rm -rf "$ISO_ROOT/nhpro"
 fi
 echo "  installer untouched: system/ is copied natively"
+
+# ------------------------------------------------------------------------------
+# 4d. Display: greetd + phosh, not SurfaceFlinger
+# ------------------------------------------------------------------------------
+# SurfaceFlinger is Android's compositor and it is the *wrong* display manager
+# for the desktop half of this OS.  NetHunter Pro brings its own stack, taken
+# straight from its debos recipe:
+#
+#   include/packages-base.yaml     droidian-phosh
+#   scripts/setup-system.sh        systemctl enable greetd      (or phosh)
+#
+# So the session is greetd -> phosh on phoc, a Wayland compositor, with
+# squeekboard as the on-screen keyboard (the skel overlay ships its layouts).
+# Starting SurfaceFlinger instead would give an Android surface with no Debian
+# session in it, which is the exact failure mode of "it boots but there is no
+# desktop".
+#
+# phosh/phoc/greetd are Debian packages and arrive with the merged rootfs, so
+# this step enables and configures them rather than installing anything.
+if [ -d "$SYS" ] && [ "$NO_FUSE" -eq 0 ] && [ -d "$SYS/kali-keep" -o -d "$SYS/usr" ]; then
+    note "Display stack: greetd + phosh (NetHunter Pro's own)"
+
+    # Detect rather than assume: the merged tree is where these landed, and the
+    # paths differ depending on whether phosh was in the collided set.
+    PHOSH_SESSION=""
+    for c in "$SYS/usr/bin/phosh-session" "$SYS/kali-keep/usr/bin/phosh-session" \
+             "$SYS/usr/bin/phosh" "$SYS/kali-keep/usr/bin/phosh"; do
+        [ -x "$c" ] || [ -e "$c" ] && { PHOSH_SESSION="$c"; break; }
+    done
+    GREETD=""
+    for c in "$SYS/usr/sbin/greetd" "$SYS/kali-keep/usr/sbin/greetd" \
+             "$SYS/usr/bin/greetd" "$SYS/kali-keep/usr/bin/greetd"; do
+        [ -e "$c" ] && { GREETD="$c"; break; }
+    done
+
+    if [ -n "$PHOSH_SESSION" ]; then
+        echo "  phosh session: ${PHOSH_SESSION#$SYS}"
+    else
+        echo "  warning: no phosh-session in the merged tree -- the desktop will not start"
+        echo "           (it comes from the droidian-phosh metapackage in the rootfs)"
+    fi
+    if [ -n "$GREETD" ]; then
+        echo "  greetd: ${GREETD#$SYS}"
+    else
+        echo "  warning: greetd absent; phosh will have to be started by hand"
+    fi
+
+    # greetd's config must point at phosh, and it must be the greeter that runs
+    # phosh rather than a tty login.  Written into /etc/greetd, which is where
+    # both Debian and the NH-Pro recipe put it.
+    sudo mkdir -p "$SYS/etc/greetd"
+    sudo tee "$SYS/etc/greetd/config.toml" >/dev/null <<'GREETD'
+# NetHunter Pro desktop session.
+#
+# greetd starts phosh on phoc (Wayland).  SurfaceFlinger is not involved: it is
+# Android's compositor, and this session is the Debian userland of the same
+# machine.  The two coexist because they are two processes, not two display
+# servers fighting over one -- Android's own SurfaceFlinger can keep running for
+# the Android side.
+[terminal]
+vt = 1
+
+[default_session]
+# phosh-session execs phoc; keep it as the session command so phosh's own
+# environment and dbus activation behave the way the packages expect.
+command = "phosh-session"
+user = "kali"
+GREETD
+    echo "  /etc/greetd/config.toml: phosh-session on vt 1"
+
+    # phoc needs the DRM device and the input devices.  On a merged rootfs the
+    # Debian session runs as a normal user, so state the groups rather than
+    # leaving it to a seat manager that is not installed.
+    sudo tee "$SYS/etc/nethunter/DISPLAY.md" >/dev/null <<'DMD'
+# Display stack
+
+Session: greetd -> phosh-session -> phoc (Wayland). Config in
+`/etc/greetd/config.toml`. This is NetHunter Pro's own stack, from its
+`droidian-phosh` package set and `scripts/setup-system.sh` which enables
+greetd, falling back to phosh.
+
+## Why not SurfaceFlinger
+
+SurfaceFlinger is Android's compositor. The desktop half of this image is a
+Debian userland, so it needs a Wayland compositor; phoc is the one phosh is
+built for. Both can run as processes on the same kernel -- they are not two
+display managers competing for one seat.
+
+## If there is no desktop
+
+1. `systemctl status greetd` -- the service must be enabled.
+2. `ls /usr/bin/phosh-session` -- comes from droidian-phosh in the rootfs.
+3. `ls -l /etc/greetd/config.toml` -- command must be `phosh-session`.
+4. The user must be in `video` and `input` to open the DRM device.
+5. `journalctl -u greetd` and `dmesg | grep -i drm` for a missing GPU driver.
+
+## Keyboard
+
+squeekboard, with the layouts the NH-Pro skel overlay ships under
+`/usr/share/squeekboard/keyboards`.
+DMD
+    echo "  /etc/nethunter/DISPLAY.md written"
+
+    # Enable the unit the way the recipe does, without running systemd here.
+    for unit in "$SYS/etc/systemd/system/multi-user.target.wants"; do
+        sudo mkdir -p "$unit"
+        for svc in greetd phosh bluetooth ssh; do
+            for link in "$SYS/usr/lib/systemd/system/$svc.service" \
+                        "$SYS/lib/systemd/system/$svc.service"; do
+                [ -e "$link" ] || continue
+                sudo ln -sf "/${link#$SYS/}" "$unit/$svc.service"
+                break
+            done
+        done
+    done
+    echo "  enabled: $(sudo ls "$SYS/etc/systemd/system/multi-user.target.wants" 2>/dev/null | tr '\n' ' ')"
+fi
 
 # ------------------------------------------------------------------------------
 # 5. ISO
@@ -812,6 +1038,42 @@ if [ "$MAKE_ISO" -eq 1 ]; then
     fi
     if [ -n "$BOOT_EFI" ]; then
         args+=(-eltorito-alt-boot -e boot/grub/efi.img -no-emul-boot)
+
+        # El Torito alone does not boot this laptop from USB.
+        #
+        # El Torito is a CD/DVD mechanism: the firmware reads a boot catalog in
+        # the ISO's first sectors.  Written to a USB stick, a UEFI machine does
+        # not look at that catalog at all -- it enumerates partitions, finds one
+        # with the ESP type, and runs /EFI/BOOT/BOOTX64.EFI from it.
+        #
+        # The base DarkMatter ISO has no partition table whatsoever (MBR
+        # signature is 0000, not 55aa), so on the Vivobook it boots when written
+        # to a DVD and is invisible as a USB stick.  That is the difference
+        # between "the ISO works" and "the ISO works on my machine".
+        #
+        # append_partition writes efi.img a second time as a real GPT/MBR
+        # partition of type 0xEF (EFI System), and isohybrid-gpt-basdat adds the
+        # protective MBR + GPT so firmware treats the stick as a disk.  Both are
+        # needed: the partition without the table is just bytes in the file.
+        #
+        # isohybrid-gpt-basdat writes GPT only when it also has an MBR template
+        # to base the protective MBR on; without one it produces a bare MBR
+        # table and the GPT header stays empty.  Firmware that prefers GPT then
+        # falls back to MBR, which usually works but is not what the UEFI spec
+        # describes as removable-media boot.  Supply the template so both
+        # tables are real.
+        ISO_MBR_TEMPLATE=""
+        for t in /usr/lib/ISOLINUX/isohdpfx.bin /usr/lib/syslinux/mbr/isohdpfx.bin \
+                 /usr/share/syslinux/isohdpfx.bin; do
+            [ -f "$t" ] && { ISO_MBR_TEMPLATE="$t"; break; }
+        done
+        if [ -n "$ISO_MBR_TEMPLATE" ]; then
+            args+=(-isohybrid-mbr "$ISO_MBR_TEMPLATE")
+        else
+            echo "  warning: no isohdpfx.bin; writing MBR-only (no GPT) -- install isolinux"
+        fi
+        args+=(-append_partition 2 0xef "$ISO_ROOT/boot/grub/efi.img"
+               -isohybrid-gpt-basdat)
     else
         echo "  warning: no efi.img -- UEFI boot unavailable"
     fi
@@ -839,6 +1101,24 @@ if [ "$MAKE_ISO" -eq 1 ]; then
     echo "size:   $(du -h "$OUT_ISO" | cut -f1)"
     echo "sha256: $(sha256sum "$OUT_ISO" | cut -d' ' -f1)"
     echo "boot:   $([ -n "$BOOT_BIOS" ] && echo BIOS) $([ -n "$BOOT_EFI" ] && echo UEFI)"
+
+    # Verify the thing the Vivobook actually needs: a partition table with an
+    # ESP, so the ISO also boots from a USB stick and not only from a DVD.
+    if [ -n "$BOOT_EFI" ]; then
+        if python3 - "$OUT_ISO" <<'PYCHK'
+import sys
+d = open(sys.argv[1], 'rb').read(2048)
+assert d[510:512] == b'\x55\xaa', "no DOS partition table (UEFI will not see this USB stick)"
+esp = [e for e in (d[446 + i*16:446 + (i+1)*16] for i in range(4)) if e[4] == 0xef]
+assert esp, "no EFI System partition (MBR type 0xef)"
+PYCHK
+        then
+            echo "        hybrid: MBR + ESP present (boots from USB, not just DVD)"
+        else
+            echo "  WARNING: ISO has no ESP partition table -- it will boot as a DVD"
+            echo "           but a UEFI laptop may not see it on a USB stick."
+        fi
+    fi
 else
     note "Staged tree only (--no-iso)"
     ls -la "$ISO_ROOT" | sed 's/^/  /'

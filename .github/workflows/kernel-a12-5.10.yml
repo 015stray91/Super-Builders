@@ -131,6 +131,21 @@ jobs:
             os_patch_level: "2025-09"
           - sub_level: "246"
             os_patch_level: "2025-12"
+          - sub_level: "252"
+            os_patch_level: "2026-04"
+          - sub_level: "257"
+            os_patch_level: "2026-07"
+          - sub_level: "260"
+            os_patch_level: "2026-07"
+          - sub_level: "264"
+            os_patch_level: "2026-07"
+          - sub_level: "269"
+            os_patch_level: "2026-10"
+          # 270 is a tag past the 2026-10 branch head (269).  The sync helper
+          # checks the tag out after syncing the branch; there is no manifest
+          # branch that names 270.
+          - sub_level: "270"
+            os_patch_level: "2026-10"
     uses: ./.github/workflows/build-sukisu.yml
     with:
       android_version: android12
@@ -187,7 +202,22 @@ jobs:
             os_patch_level: "2025-09"
           - sub_level: "246"
             os_patch_level: "2025-12"
-    uses: ./.github/workflows/build-ksu-next.yml
+          - sub_level: "252"
+            os_patch_level: "2026-04"
+          - sub_level: "257"
+            os_patch_level: "2026-07"
+          - sub_level: "260"
+            os_patch_level: "2026-07"
+          - sub_level: "264"
+            os_patch_level: "2026-07"
+          - sub_level: "269"
+            os_patch_level: "2026-10"
+          # 270 is a tag past the 2026-10 branch head (269).  The sync helper
+          # checks the tag out after syncing the branch; there is no manifest
+          # branch that names 270.
+          - sub_level: "270"
+            os_patch_level: "2026-10"
+    uses: ./.github/workflows/build-ksu-next-gki.yml
     with:
       android_version: android12
       kernel_version: "5.10"
@@ -199,7 +229,7 @@ jobs:
       add_bbg: ${{ inputs.add_bbg }}
       add_overlayfs_support: ${{ inputs.add_overlayfs_support }}
       add_kpm: ${{ inputs.add_kpm }}
-      sukisu_commit: ${{ inputs.sukisu_commit }}
+      ksunext_commit: ${{ inputs.sukisu_commit }}
       device_codename: ${{ inputs.device_codename }}
 
   build-resukisu:
@@ -243,6 +273,21 @@ jobs:
             os_patch_level: "2025-09"
           - sub_level: "246"
             os_patch_level: "2025-12"
+          - sub_level: "252"
+            os_patch_level: "2026-04"
+          - sub_level: "257"
+            os_patch_level: "2026-07"
+          - sub_level: "260"
+            os_patch_level: "2026-07"
+          - sub_level: "264"
+            os_patch_level: "2026-07"
+          - sub_level: "269"
+            os_patch_level: "2026-10"
+          # 270 is a tag past the 2026-10 branch head (269).  The sync helper
+          # checks the tag out after syncing the branch; there is no manifest
+          # branch that names 270.
+          - sub_level: "270"
+            os_patch_level: "2026-10"
     uses: ./.github/workflows/build-resukisu.yml
     with:
       android_version: android12
@@ -299,6 +344,21 @@ jobs:
             os_patch_level: "2025-09"
           - sub_level: "246"
             os_patch_level: "2025-12"
+          - sub_level: "252"
+            os_patch_level: "2026-04"
+          - sub_level: "257"
+            os_patch_level: "2026-07"
+          - sub_level: "260"
+            os_patch_level: "2026-07"
+          - sub_level: "264"
+            os_patch_level: "2026-07"
+          - sub_level: "269"
+            os_patch_level: "2026-10"
+          # 270 is a tag past the 2026-10 branch head (269).  The sync helper
+          # checks the tag out after syncing the branch; there is no manifest
+          # branch that names 270.
+          - sub_level: "270"
+            os_patch_level: "2026-10"
     uses: ./.github/workflows/build-wksu.yml
     with:
       android_version: android12

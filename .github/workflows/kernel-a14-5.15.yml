@@ -171,7 +171,7 @@ jobs:
             os_patch_level: "2025-10"
           - sub_level: "194"
             os_patch_level: "2026-01"
-    uses: ./.github/workflows/build-ksu-next.yml
+    uses: ./.github/workflows/build-ksu-next-gki.yml
     with:
       android_version: android14
       kernel_version: "5.15"
@@ -183,7 +183,7 @@ jobs:
       add_bbg: ${{ inputs.add_bbg }}
       add_overlayfs_support: ${{ inputs.add_overlayfs_support }}
       add_kpm: ${{ inputs.add_kpm }}
-      sukisu_commit: ${{ inputs.sukisu_commit }}
+      ksunext_commit: ${{ inputs.sukisu_commit }}
       device_codename: ${{ inputs.device_codename }}
 
   build-resukisu:

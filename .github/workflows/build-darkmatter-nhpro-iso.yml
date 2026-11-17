@@ -105,7 +105,9 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq \
             squashfs-tools xorriso rsync curl xz-utils e2fsprogs \
-            android-sdk-libsparse-utils cpio
+            android-sdk-libsparse-utils cpio isolinux syslinux-common mtools
+          # isolinux provides /usr/lib/ISOLINUX/isohdpfx.bin, the MBR template
+          # isohybrid-gpt-basdat needs to write a real GPT for USB boot.
           for c in unsquashfs mksquashfs xorriso mke2fs debugfs simg2img; do
             command -v "$c" >/dev/null || { echo "missing $c" >&2; exit 1; }
           done
@@ -269,6 +271,20 @@ jobs:
           ls -l "$ISO"
           echo "--- boot records"
           xorriso -indev "$ISO" -report_el_torito plain 2>/dev/null | grep -E "El Torito"
+          echo "--- hybrid partition table (USB boot)"
+          xorriso -indev "$ISO" -report_system_area plain 2>/dev/null \
+            | grep -E "System area summary|MBR partition|GPT disk GUID" || true
+          # The Vivobook needs an ESP on a partitioned image, not an El Torito
+          # catalog.  Fail the build rather than publish a DVD-only ISO.
+          python3 - "$ISO" <<'PYCHK'
+          import sys
+          d = open(sys.argv[1], 'rb').read(2048)
+          if d[510:512] != b'\x55\xaa':
+              sys.exit("FAIL: no DOS partition table - UEFI will not boot this from USB")
+          if not [e for e in (d[446 + i*16:446 + (i+1)*16] for i in range(4)) if e[4] == 0xef]:
+              sys.exit("FAIL: no EFI System partition (type 0xef) - DVD-only image")
+          print("OK: MBR + ESP present, boots from USB")
+          PYCHK
           echo "--- top level"
           xorriso -indev "$ISO" -find / -maxdepth 1 2>/dev/null || true
           {
