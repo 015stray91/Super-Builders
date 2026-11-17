@@ -1,0 +1,4 @@
+
+# Python bytecode from installer/patch-1-install.py
+__pycache__/
+*.pyc
