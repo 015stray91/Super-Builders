@@ -54,7 +54,8 @@ set -euo pipefail
 #
 # Usage:
 #   ./fuse_darkmatter_nh.sh --base-iso DarkMatter.iso --kernel-dir DIR \
-#                           --kalifs kali-amd64.tar.xz [--out DIR]
+#                           --kalifs kali-amd64.tar.xz [--out DIR] \
+#                           [--firmware firmware-amd-graphics_*.deb]
 #
 #   --base-iso  the original DarkMatter ISO (preferred: it is the authority,
 #               and a local working tree may hold leftovers from earlier runs)
@@ -72,6 +73,11 @@ NH_APK_SRC=""
 # Installed with dpkg-deb --extract under apt Dir= redirection, so no chroot is
 # involved; see install_pkgs_into_tree().
 EXTRA_PKGS=""
+# GPU/device firmware, from a firmware-nonfree .deb or an unpacked directory.
+# Lands in the tree's /lib/firmware (i.e. /system/lib/firmware live), which is
+# where the kernel's fw_path points.  See stage_firmware() for why the deb's own
+# /usr/lib layout cannot be copied verbatim.
+FIRMWARE_SRC=""
 FIRMWARE_SRC=""
 # Directory containing this script, so helper files (installer/, the patch
 # scripts) resolve regardless of the caller's working directory.
