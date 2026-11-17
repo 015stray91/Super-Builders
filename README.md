@@ -1,9 +1,10 @@
 <p align="center">
   <h1 align="center">⚡ Super-Builders</h1>
-  <p align="center"><b>Pre-Patched GKI Kernel Builds for ZeroMount + SUSFS</b></p>
-  <p align="center">Every kernel version. Every KSU variant. One CI pipeline.</p>
+  <p align="center"><b>NUKI kernel builds with SUSFS + ZeroMount — GKI trees supported too</b></p>
+  <p align="center">One tree, one kernel image, one user space. Every KSU variant. One CI pipeline.</p>
   <p align="center">
     <img src="https://img.shields.io/badge/status-beta-orange?style=for-the-badge" alt="Beta">
+    <img src="https://img.shields.io/badge/NUKI-one_kernel_one_rootfs-green?style=for-the-badge&logo=linux" alt="NUKI">
     <img src="https://img.shields.io/badge/GKI-android_12--16-green?style=for-the-badge&logo=android" alt="GKI">
     <img src="https://img.shields.io/badge/Telegram-community-blue?style=for-the-badge&logo=telegram" alt="Telegram">
   </p>
@@ -22,7 +23,24 @@
 
 ## 🧬 What is Super-Builders?
 
-Super-Builders is the **kernel build pipeline** for [ZeroMount](https://github.com/Enginex0/zeromount). It takes Google's stock GKI kernel sources, applies the SUSFS + ZeroMount VFS patches, and compiles them across every supported Android version, kernel version, and KSU variant via GitHub Actions CI.
+Super-Builders is the **kernel build pipeline** for [ZeroMount](https://github.com/Enginex0/zeromount). It takes a kernel tree, applies the SUSFS + ZeroMount VFS patches, and compiles it across every supported target and KSU variant via GitHub Actions CI.
+
+### The build model: NUKI + NURFS, not GKI
+
+**NUKI** (Native Unified Kernel Image) and **NURFS** (Native Unified Root File System) are the point of this repo's own builds:
+
+- **one kernel image**, compiled whole from one tree — no separated vendor module set, no KMI to match at boot;
+- **one user space**, integrated natively — no chroot, proot, container, or libc translator;
+- **bionic and glibc both run**, because the kernel is the kernel. `execve` does not check which libc an ELF interpreter names.
+
+Two targets are built this way today:
+
+| Target | Tree | Arch |
+|---|---|---|
+| Moto G Stylus 5G 2023 (genevn) | `AR-NUKI-genevn`, 5.10.240 | arm64 |
+| ASUS Vivobook Go 14/15 — DarkMatter + NetHunter Pro ISO | `kernel-zenith`, 6.12 | x86_64 |
+
+The **GKI track** below is a separate, genuinely different thing: Google's core-kernel-plus-vendor-modules contract, matched through a frozen KMI. It is supported here for devices that need it, and `KERNEL-ANDROID-MAPPING.md` explains how the two differ and why the version numbers confuse people. GKI is the reference, not the default.
 
 The kernels built here provide the **infrastructure layer** — the hiding primitives, VFS hooks, and control interfaces that the [ZeroMount userspace module](https://github.com/Enginex0/zeromount) relies on for mountless module loading, root detection evasion, and SUSFS automation.
 

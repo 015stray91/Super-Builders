@@ -1,6 +1,7 @@
 {
   "devices": {
     "genevn-g": {
+      "build_target": "NUKI/NURFS",
       "name": "Motorola G Stylus 5G 2023",
       "codename": "genevn",
       "android_version": "android14",
@@ -29,9 +30,11 @@
       "add_kpm": true,
       "add_nethunter": true,
       "android_version_note": "android14 = the ROM this unit runs now, not its KMI and not the release it launched on. This device launched on Android 12; docs claiming Android 13 are wrong. SM6450 on a 5.10 vendor tree is GKI 1.0: its KMI list is android/abi_gki_aarch64_moto, which ships in android12-5.10 and not android13-5.10. This build clones kernel_source and never derives VERSION_DIR, so patch-directory resolution does not affect it.",
-      "kernel_tree_note": "AR-NUKI-genevn is the real genevn kernel tree (5.10.240, arch/arm64 + drivers present, fs/susfs.c and fs/zeromount.c already in-tree). The previous value kernel-msm-1 was wrong: that repo carries only README.md, CROSS_REFERENCES.md and fs/koto/ -- it is the source repo in the Colonel chain, not buildable. kernel-zenith is the separate x86_64 tree for the DarkMatter ISO and must not be used for this device."
+      "kernel_tree_note": "AR-NUKI-genevn is the real genevn kernel tree (5.10.240, arch/arm64 + drivers present, fs/susfs.c and fs/zeromount.c already in-tree). The previous value kernel-msm-1 was wrong: that repo carries only README.md, CROSS_REFERENCES.md and fs/koto/ -- it is the source repo in the Colonel chain, not buildable. kernel-zenith is the separate x86_64 tree for the DarkMatter ISO and must not be used for this device.",
+      "build_target_note": "NUKI = Native Unified Kernel Image, NURFS = Native Unified Root File System. One kernel image built whole from AR-NUKI-genevn with the user space integrated natively -- no chroot, proot, container or libc translator. This is NOT a GKI build: there is no KMI to match and no separately-built vendor module set. The android_version field records lineage (what the tree derives from), not a Google branch being built."
     },
     "darkmatter-vivobook": {
+      "build_target": "NUKI/NURFS",
       "name": "ASUS Vivobook Go 14/15 (DarkMatter + NetHunter Pro)",
       "codename": "darkmatter-amd64",
       "board_model": "E1404FA",
@@ -88,7 +91,8 @@
       "add_zram": true,
       "add_overlayfs": true,
       "add_kpm": false,
-      "add_nethunter": true
+      "add_nethunter": true,
+      "build_target_note": "NUKI/NURFS on x86_64: kernel-zenith 6.12 built whole, DarkMatter rootfs with the Kali user space merged into it at build time, one kernel and one user space. Not a GKI build and not Android-x86 stock -- the ISO base is DarkMatter Exo 4.7 (Android-x86 7.1.1) but the result is a native unified image."
     }
   }
 }

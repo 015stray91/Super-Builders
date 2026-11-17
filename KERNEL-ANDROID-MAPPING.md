@@ -1,11 +1,42 @@
 # Kernel ↔ Android: what the numbers actually mean
 
-This file exists because the same kernel version appears under more than one
-Android release, and this repo's documentation had drifted into treating some of
-those as synonyms. They are not — and one of the corrections below contradicts an
-earlier version of this very file.
+## Read this first: GKI is the reference, not the target
 
-## Two independent numbers
+Most of this file is about Google's GKI branches. That is **background**, not the
+architecture this repo builds. Two separate things live here and they should not
+be confused:
+
+| | **GKI** (Google's contract) | **NUKI / NURFS** (this project) |
+|---|---|---|
+| what it is | a core kernel plus separately-built vendor modules, matched by a frozen KMI | one kernel image, built whole from one tree, with the user space integrated into it |
+| modules | split out; must match a symbol list | built in-tree; `CONFIG_DEBUG_INFO=n`, no autoksyms, no module contract to satisfy |
+| rootfs | Android's, with vendor partitions | one rootfs, native, no chroot / proot / container / translator |
+| who decides | Google's KMI + the SoC vendor's module list | this repo's own config chain |
+| failure mode if you get it wrong | modules refuse to load | nothing — there is no counterpart to match |
+
+**NUKI = Native Unified Kernel Image. NURFS = Native Unified Root File System.**
+The point of both is that the kernel and the user space are one artefact built
+from one tree, so there is no KMI negotiation at boot and no second user space
+to translate into. bionic and glibc both run on it because the kernel is the
+kernel — `execve` does not inspect which libc an ELF interpreter names.
+
+So when the rest of this file explains how `android12-5.10` differs from
+`android13-5.10`, that is answering *"which Google branch would this have come
+from, and why are people arguing about the number"* — not describing the build.
+The genevn build does not use a GKI branch at all: it uses `AR-NUKI-genevn`,
+which is its own tree, and the ISO build uses `kernel-zenith`. Both are built
+the NUKI way.
+
+Where GKI knowledge still earns its place here:
+
+- it explains the `5.10-9` shorthand and why it is not a sub-level,
+- it explains what `vendor_boot` and the two-stage ramdisk are, which the Moto
+  does use,
+- it tells you what *not* to reach for when adding a device.
+
+Everything below is reference material for those three jobs.
+
+## Two independent numbers (GKI reference)
 
 A GKI target is identified by **two** things:
 
