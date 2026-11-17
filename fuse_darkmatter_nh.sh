@@ -141,35 +141,38 @@ else
     # and it lands in OUT_DIR, so count it.
     gh_sz=$(stat -c %s "$BASE_ISO")
 fi
+# System tree.  It is still staged as an image/wrapper on input (that is the
+# only form the base ISO ships it in), so it is unpacked once.  What it costs
+# afterwards changed with the monolithic layout: a directory is written into
+# the ISO at its own size, with no ext4 image and no second squashfs copy.
 sys_sz=0; sys_unpacked=0; sys_phrase=""
 if [ -n "$SYSTEM_IMG" ] && [ "$NO_FUSE" -eq 0 ]; then
     if [ -f "$SYSTEM_IMG" ]; then
         sys_sz=$(stat -c %s "$SYSTEM_IMG")
         sys_unpacked=$(( sys_sz * 2 ))
-        sys_phrase="the image unpacks to ~$(numfmt --to=iec $((sys_sz * 2)))-$(numfmt --to=iec $((sys_sz * 3))) and is repacked again"
+        sys_phrase="the wrapper is unpacked to a directory of ~$(numfmt --to=iec $((sys_sz * 2)))"
     elif [ -d "$SYSTEM_IMG" ]; then
         sys_unpacked=$(du -sb "$SYSTEM_IMG" 2>/dev/null | cut -f1)
         sys_sz=$sys_unpacked
-        sys_phrase="already unpacked, so it is only copied and repacked"
+        sys_phrase="already a directory, so it is staged and written out once"
     fi
 fi
-# Kali rootfs: it is copied into the system tree verbatim, so it costs its own
-# size inside the sysroot *and* again inside the rebuilt image.  Ignoring it
-# here means a build that dies at the last mksquashfs.
+# Kali rootfs: staged under the ISO tree and written into the ISO as one file,
+# so it costs its size once.  It no longer rides inside the system tree.
 kali_sz=0
-if [ -n "$KALIFS" ] && [ -f "$KALIFS" ] && [ "$NO_FUSE" -eq 0 ]; then
+if [ -n "${KALIFS:-}" ] && [ -f "$KALIFS" ] && [ "$NO_FUSE" -eq 0 ]; then
     kali_sz=$(stat -c %s "$KALIFS")
 fi
 
-# gh copy + sysroot in place + repacked sfs + the final ISO + the rootfs twice.
-need=$(( gh_sz + sys_unpacked + sys_unpacked / 3 + gh_sz / 10 + kali_sz * 2 ))
+# gh copy + unpacked system tree + staged rootfs + the output ISO.
+need=$(( gh_sz + sys_unpacked + kali_sz + (sys_unpacked + kali_sz) / 10 ))
 avail=$(df -B1 --output=avail "$OUT_DIR" | tail -1 | tr -d ' ')
 echo "  boot tree:   $(numfmt --to=iec "$gh_sz")"
 if [ "$sys_unpacked" -gt 0 ]; then
     echo "  system:      $(numfmt --to=iec "$sys_sz") -- $sys_phrase"
 fi
 if [ "$kali_sz" -gt 0 ]; then
-    echo "  rootfs:      $(numfmt --to=iec "$kali_sz") (counted twice: sysroot + image)"
+    echo "  rootfs:      $(numfmt --to=iec "$kali_sz") (staged once, written once)"
 fi
 echo "  estimated:   $(numfmt --to=iec "$need")"
 echo "  available:   $(numfmt --to=iec "$avail")"
@@ -450,7 +453,18 @@ else
         done
     fi
     if [ -n "$KALIFS" ] && [ -f "$KALIFS" ]; then
-        sudo mkdir -p "$SYS/etc/nethunter"
+        # The Kali rootfs does NOT belong inside /system.
+        #
+        # It is 2.2 GB compressed and ~8 GB expanded, and putting it in the
+        # system image charged it twice (once in the tree, once in the built
+        # image), ate the image's free space, and pushed system.sfs past the
+        # 4 GiB single-file limit.  None of that buys anything: it is not part
+        # of the Android system, it is the other half of the OS.
+        #
+        # Ship it at the top level of the ISO instead, as a single file the
+        # installer copies to the target and the first boot expands to a real
+        # directory on the NVMe.  Real files, real paths, no loop device.
+        sudo mkdir -p "$ISO_ROOT/nhpro"
         # Keep the real extension: the Kali rootfs is .tar.xz, and naming it
         # .tar.gz then extracting with `tar -zxf` fails on the first block.
         case "$KALIFS" in
@@ -460,11 +474,11 @@ else
             *.tar)            KALI_NAME=kalifs-amd64.tar ;;
             *)                KALI_NAME="kalifs-amd64.$(basename "$KALIFS")" ;;
         esac
-        sudo cp -f "$KALIFS" "$SYS/etc/nethunter/$KALI_NAME"
-        echo "  rootfs <- $(basename "$KALIFS") ($(du -h "$KALIFS" | cut -f1)) as $KALI_NAME"
+        sudo cp -f "$KALIFS" "$ISO_ROOT/nhpro/$KALI_NAME"
+        echo "  rootfs -> /nhpro/$KALI_NAME ($(du -h "$KALIFS" | cut -f1))"
     elif [ -d "$GH_DIR/nh-unpacked/rootfs/kali-amd64" ]; then
-        sudo mkdir -p "$SYS/etc/nethunter"
-        sudo tar -czf "$SYS/etc/nethunter/kalifs-amd64.tar.gz" \
+        sudo mkdir -p "$ISO_ROOT/nhpro"
+        sudo tar -czf "$ISO_ROOT/nhpro/kalifs-amd64.tar.gz" \
              -C "$GH_DIR/nh-unpacked/rootfs" kali-amd64
         KALI_NAME=kalifs-amd64.tar.gz
         echo "  rootfs archived from nh-unpacked/rootfs/kali-amd64"
@@ -490,7 +504,9 @@ exec >>"$LOG" 2>&1
 echo "--- nethunter firstboot $(date)"
 
 if [ ! -d /data/local/nhsystem/kali-amd64 ]; then
-    for f in /system/etc/nethunter/kalifs-amd64.tar.*; do
+    # The rootfs ships at the top of the ISO and the installer copies it to
+    # /nhpro on the target; on a live boot it is read straight off the CD.
+    for f in /nhpro/kalifs-amd64.tar.* /system/etc/nethunter/kalifs-amd64.tar.*; do
         [ -f "$f" ] || continue
         echo "extracting $(basename "$f")"
         # Android ships toybox tar, which handles gzip but not always xz, and
@@ -525,13 +541,38 @@ EOF
     #   system.img   ext4, contains the /system tree
     #   system.sfs   squashfs wrapper containing exactly one file: system.img
     #
-    # The initrd does `mount -o loop system.sfs /sfs` then
-    # `mount -o loop /sfs/system.img system`, so a squashfs of a plain directory
-    # would mount and then have no system.img to open.  Build the ext4 image
-    # first, then wrap that single file.
-    note "Repacking system image"
+    # Monolithic layout: the ISO carries a plain `system/` directory.
+    #
+    # This is not a shortcut, it is the shape android-x86 installs natively.
+    # From the base ISO's own initrd:
+    #
+    #   elif [ -d /mnt/$SRC/system ]; then
+    #       remount_rw
+    #       mount --bind /mnt/$SRC/system system
+    #
+    # and its installer:
+    #
+    #   if [ "$fs" = "vfat" -o "$fs" = "fuseblk" ]; then
+    #       sysimg="mnt/$SRC/system.*"        # image, for FAT only
+    #   else
+    #       sysimg="android/system"           # a directory, for ext4
+    #   fi
+    #
+    # On ext4 -- which is what a normal Linux install on the Vivobook's NVMe
+    # uses -- the installer cpio's that directory tree straight onto the target
+    # partition.  No image, no loop mount, no filesystem inside a filesystem.
+    #
+    # The system.sfs/system.img pair only exists for FAT and for the live boot.
+    # It is also what forced the 4 GiB single-file fight, and what made the
+    # payload cost twice its size while handing /system a fixed 90 MB of free
+    # space.  A plain tree has neither problem: it is exactly as large as its
+    # contents, and it is the same thing the user gets from any distro ISO.
+    note "Writing the monolithic system tree"
 
-    ROOT="$WORK/sysroot"
+    # SYS is set by the unpacking block above and points at the tree in every
+    # input form (wrapper, bare image, directory).  Use it rather than assuming
+    # $WORK/sysroot: on a directory input that path does not exist.
+    ROOT="$SYS"
     [ -d "$ROOT/system" ] && ROOT="$ROOT/system"
 
     used_kb=$(sudo du -sk "$ROOT" | cut -f1)
@@ -540,46 +581,113 @@ EOF
     # to work it out from the final image size.
     echo "  largest directories in the payload:"
     sudo du -sk "$ROOT"/* 2>/dev/null | sort -rn | head -6 \
-        | awk '{printf "    %8s  %s\n", $1/1024 "M", $2}' 
-    # ext4 needs room for metadata and the journal; 15% headroom is enough for
-    # a mostly-read-only system partition and keeps the image from being huge.
-    img_kb=$(( used_kb + used_kb / 6 + 65536 ))
-    echo "  payload:   $(numfmt --to=iec $((used_kb*1024)))"
-    echo "  image size: $(numfmt --to=iec $((img_kb*1024))) (payload + 15% + 64M slack)"
+        | awk '{printf "    %8s  %s\n", $1/1024 "M", $2}'
+    echo "  payload: $(numfmt --to=iec $((used_kb*1024)))"
 
-    # Build the image directly at the path the wrapper needs.  A separate copy
-    # step would duplicate ~2 GB on disk for no reason, and this is the step
-    # that runs closest to the free-space limit.
-    rm -rf "$WORK/wrapdir" "$ISO_ROOT/system.sfs"
-    mkdir -p "$WORK/wrapdir"
-    IMG="$WORK/wrapdir/system.img"
-    rm -f "$IMG"
-    truncate -s "$((img_kb*1024))" "$IMG"
-    # -d root_dir makes mke2fs populate the filesystem itself, which preserves
-    # ownership, modes and the read-only system layout.
-    sudo mke2fs -q -t ext4 -b 4096 -L system -d "$ROOT" "$IMG"
-    sudo e2fsck -f -y "$IMG" >/dev/null 2>&1 || true
-    echo "  system.img: $(du -h "$IMG" | cut -f1), $(dumpe2fs -h "$IMG" 2>/dev/null | awk '/Free blocks/{printf "%.0f MB free", $3*4/1000}')"
+    # Replace the two-layer image with a directory.  Removing the old
+    # system.sfs matters: the initrd tries system.sfs first, so leaving it in
+    # place would boot the stale image and silently ignore everything below.
+    rm -rf "$ISO_ROOT/system" "$ISO_ROOT/system.sfs"
+    mv_to="$ISO_ROOT/system"
+    # Only move when the tree really is our own scratch copy.  --system also
+    # accepts a directory the user passed in, and moving that would delete it
+    # from under them; copy in that case.
+    case "$ROOT" in
+        "$WORK"/*) sudo mv "$ROOT" "$mv_to" ;;
+        *)         sudo cp -a "$ROOT" "$mv_to" ;;
+    esac
+    sudo chown -R "$(id -u):$(id -g)" "$mv_to"
+    # The installer does `chown 0.0 *` itself, but the tree must ship with
+    # root-owned paths and sane modes or a live boot gets a mismatched system.
+    echo "  system/: $(find "$mv_to" | wc -l) paths, $(du -sh "$mv_to" | cut -f1)"
+    for must in bin build.prop etc framework lib priv-app; do
+        [ -e "$mv_to/$must" ] || die "system/$must is missing -- this is not an Android system tree"
+    done
+    # Android needs lib, lib64 and vendor reachable at the top level too; the
+    # base image keeps vendor inside system/, so nothing extra to place there.
+    [ -d "$mv_to/vendor" ] && echo "  system/vendor/ present"
 
-    # The unpacked tree is no longer needed once it is inside the image, and
-    # for a real system it is ~2 GB.  Freeing it here is what keeps the peak
-    # under the space estimate.
     sudo rm -rf "$WORK/sysroot"
+fi
 
-    # Wrap it.  gzip, not xz: the base image is gzip and the initrd mounts it
-    # before anything else, so stay on the format that is known to work here.
-    sudo chown -R "$(id -u):$(id -g)" "$WORK/wrapdir"
-    mksquashfs "$WORK/wrapdir" "$ISO_ROOT/system.sfs" \
-        -comp gzip -b 128K -noappend -no-progress >/dev/null
-    echo "  system.sfs: $(du -h "$ISO_ROOT/system.sfs" | cut -f1) (wraps system.img)"
+# ------------------------------------------------------------------------------
+# 4b. Teach the installer to carry the Kali rootfs
+# ------------------------------------------------------------------------------
+# install.img is a gzipped cpio of the android-x86 installer.  Its 1-install
+# script copies a fixed list of paths from the CD onto the target:
+#
+#   files="mnt/$SRC/kernel mnt/$SRC/gearlock ... $sysimg"
+#   ( cd /; find $files | cpio -H newc -o ) | ( cpio -iud )
+#
+# $sysimg is "android/system" on ext4 -- a directory -- so the monolithic tree
+# we just wrote installs natively with no change.  Only /nhpro is unknown to
+# it, and a file it does not list is a file that never reaches the disk.  Add
+# it to that list so the rootfs is installed in the same pass as the system,
+# and so the space check counts it.
+if [ -f "$ISO_ROOT/install.img" ] && [ -d "$ISO_ROOT/nhpro" ]; then
+    note "Patching the installer to carry /nhpro"
+    IPATCH="$WORK/install-patch"
+    # sudo: the tree below is unpacked root-owned (the archive is root:root),
+    # so an unprivileged rm leaves it behind and the next run reuses a
+    # half-patched copy.
+    sudo rm -rf "$IPATCH"; mkdir -p "$IPATCH"
+    # umask 000 and root ownership matter even here: the installer runs as
+    # root and executes these scripts, and a rebuild under the normal umask
+    # drops the execute bits (verified: 775 dirs came back 755, and a file
+    # list diff that looked clean still had 0775 -> 0755 everywhere).
+    ( cd "$IPATCH" && umask 000 && zcat "$ISO_ROOT/install.img" | sudo cpio -idmu --quiet )
+    SCRIPT="$IPATCH/scripts/1-install"
+    [ -f "$SCRIPT" ] || die "install.img has no scripts/1-install -- unexpected layout"
 
-    # Verify the wrapper really contains system.img -- this is the exact thing
-    # that silently breaks the boot if it is wrong.
-    if unsquashfs -l "$ISO_ROOT/system.sfs" 2>/dev/null | grep -q 'system\.img$'; then
-        echo "  verified: system.sfs contains system.img"
+    if grep -q '\$SRC/nhpro' "$SCRIPT"; then
+        echo "  already patched"
     else
-        die "system.sfs does not contain system.img -- this ISO would not boot"
+        # Anchor on the unchanged file-list line rather than a line number, and
+        # fail loudly if the base ISO ever moves it.
+        grep -q 'files="mnt/\$SRC/kernel' "$SCRIPT" \
+            || die "cannot find the installer file list; refusing to guess"
+
+        # 1. Add /nhpro to the copy list.  Done in python, not sed: the pattern
+        # needs a quote and two backslashes inside a shell string, and getting
+        # that wrong silently patches nothing.
+        sudo python3 - "$SCRIPT" <<'PATCH'
+import re, sys
+p = sys.argv[1]
+s = open(p).read()
+s2 = re.sub(r'(files="mnt/\$SRC/kernel[^"]*)"', r'\1 mnt/$SRC/nhpro"', s, count=1)
+if s2 == s:
+    sys.exit("the installer file list did not match")
+open(p, "w").write(s2)
+PATCH
+
+        # 2. The Install menu's own idea of required space is 4-8 GB, which is
+        # fine for Android alone and far too small with an expanded Kali tree
+        # next to it.  Say so where the user picks a partition.
+        sudo sed -i 's#Recommended minimum free space - 4GB  |  Optimum free space >= 8GB#Recommended minimum free space - 16GB  |  Optimum free space >= 32GB (Android system + Kali NetHunter Pro rootfs)#' "$SCRIPT" 2>/dev/null || true
+
+        grep -q '\$SRC/nhpro' "$SCRIPT" \
+            || die "the installer patch did not take -- /nhpro would not be installed"
+        echo "  /nhpro added to the installer's copy list"
     fi
+
+    # Repack it the way it arrived: gzipped newc cpio, root-owned, at the same
+    # path the initrd extracts it from.
+    # --owner=0:0 so the archive says root:root regardless of how it was
+    # unpacked; the original install.img is root-owned and the initrd extracts
+    # it as root before running anything.
+    ( cd "$IPATCH" && find . -print0 \
+        | sudo cpio --null -o -H newc --quiet --owner=0:0 ) \
+        | gzip -9 > "$WORK/install.img.new"
+    rm -f "$ISO_ROOT/install.img"
+    cp -f "$WORK/install.img.new" "$ISO_ROOT/install.img"
+    sudo rm -rf "$IPATCH"; rm -f "$WORK/install.img.new"
+
+    # Prove it round-trips before it goes in the ISO.
+    zcat "$ISO_ROOT/install.img" | cpio -t --quiet 2>/dev/null | grep -qx 'scripts/1-install' \
+        || die "rebuilt install.img is not readable"
+    echo "  install.img rebuilt ($(stat -c %s "$ISO_ROOT/install.img") bytes)"
+else
+    [ -d "$ISO_ROOT/nhpro" ] || echo "  note: no /nhpro -- installer needs no patch"
 fi
 
 # ------------------------------------------------------------------------------
@@ -597,13 +705,25 @@ if [ "$MAKE_ISO" -eq 1 ]; then
         die "no boot image found (isolinux/isolinux.bin or boot/grub/efi.img)"
     fi
 
-    # -iso-level 3 is required, not cosmetic.  Plain ISO9660 level 1 refuses
-    # any single file of 4 GiB or more ("File cannot be added to image because
-    # its size is 4 GiB or larger / A file is bigger than supported by used
-    # standard"), and once the Kali rootfs is fused in, system.sfs is 5+ GB.
-    # Level 3 allows multi-extent files and still writes both El Torito
-    # entries, so BIOS and UEFI boot are unaffected.
-    args=(-as mkisofs -r -iso-level 3 -V "DARKMATTER_NH_KSU" -o "$OUT_ISO")
+    # -R (Rock Ridge), NOT -r.
+    #
+    # This is the difference between a working system tree and a brick.  -r is
+    # "-rational-rock", which strips ownership and forces every file 444->
+    # actually 0555 for directories/0555-or-0444 for files, and drops setuid.
+    # Measured on a round trip through xorriso:
+    #
+    #   original 755 / 644 / 4755 / 600
+    #   with -r  555 / 444 / 0555 / 444     <- setuid gone, all writable bits gone
+    #   with -R  755 / 644 / 4755 / 600     <- preserved
+    #
+    # Android's /system is full of 0755 executables and 0644 config, and the
+    # installer copies the tree verbatim, so -r would install a system where
+    # nothing is executable.  -R keeps POSIX modes, uids and symlinks.
+    #
+    # -iso-level 3 allows files over 4 GiB.  The tree no longer needs it, but
+    # the Kali rootfs still rides along as one large file and level 3 costs
+    # nothing -- both El Torito entries are still written.
+    args=(-as mkisofs -R -iso-level 3 -V "DARKMATTER_NH_KSU" -o "$OUT_ISO")
     if [ -n "$BOOT_BIOS" ]; then
         args+=(-b isolinux/isolinux.bin -c isolinux/boot.cat
                -no-emul-boot -boot-load-size 4 -boot-info-table)
