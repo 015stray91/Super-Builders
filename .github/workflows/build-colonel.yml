@@ -42,16 +42,44 @@ jobs:
           path: super-builders
           fetch-depth: 1
 
-      - name: Install Dependencies (jammy - clang12 + clang17 safe)
+      - name: Install Dependencies (kernel toolchain, clang-12)
         run: |
           sudo apt-get update
+          # Everything needed to build the kernel. This list must not name a
+          # package the runner's release does not ship: on jammy there is no
+          # llvm-17/clang-17/lld-17, and one missing name fails the whole install
+          # with exit 100 before any kernel work starts.
           sudo apt-get install -y bc bison flex libssl-dev libelf-dev cpio kmod python3 \
             lz4 liblz4-tool libncurses-dev rsync zip curl wget make device-tree-compiler \
             gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu lld-12 llvm-12 clang-12 \
-            llvm-17 clang-17 lld-17 cmake ninja-build git-lfs
+            cmake ninja-build git-lfs
           sudo ln -sf /usr/bin/clang-12 /usr/bin/clang
           sudo ln -sf /usr/bin/ld.lld-12 /usr/local/bin/ld.lld
           sudo ln -sf /usr/bin/ld.lld-12 /usr/local/bin/ld64.lld
+
+      - name: Install LLVM 17 (optional - plugin fallback only)
+        continue-on-error: true
+        run: |
+          # Kotoamatsukami is consumed as a pre-built, statically linked .so:
+          # ldd on it shows only libstdc++/libc/libm/libgcc_s and no LLVM
+          # runtime. LLVM 17 is therefore needed only if the .so is missing from
+          # the branch and the plugin has to be compiled in this job.
+          #
+          # Jammy does not carry llvm-17 in its own archive, so fall back to
+          # apt.llvm.org. Either way this step is allowed to fail: the job is not
+          # blocked on a dependency the pre-built path never touches.
+          if sudo apt-get install -y llvm-17 clang-17 lld-17; then
+            echo "llvm-17 from the distribution archive"
+            exit 0
+          fi
+          echo "not in the archive; adding apt.llvm.org"
+          curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key \
+            | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
+          . /etc/os-release
+          echo "deb http://apt.llvm.org/$VERSION_CODENAME/ llvm-toolchain-$VERSION_CODENAME-17 main" \
+            | sudo tee /etc/apt/sources.list.d/llvm17.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y llvm-17 clang-17 lld-17
 
       - name: Pull pre-built Kotoamatsukami LLVM 17 plugin (remote, no build)
         run: |
@@ -69,10 +97,17 @@ jobs:
             echo "WARNING: pre-built .so missing, falling back to local build"
             cd kotoamatsukami
             mkdir -p build && cd build
-            if [ -f /usr/lib/llvm-17/lib/cmake/llvm/LLVMConfig.cmake ]; then
-              LLVM_DIR=/usr/lib/llvm-17/lib/cmake/llvm
-            else
-              LLVM_DIR=/usr/lib/cmake/llvm-17
+            # cmake handed an LLVM_DIR that does not exist prints a wall of noise
+            # that reads like a compiler bug. Check first and name the real
+            # problem: the branch did not carry the .so this job expects.
+            LLVM_DIR=""
+            for c in /usr/lib/llvm-17/lib/cmake/llvm /usr/lib/cmake/llvm-17 \
+                     /usr/lib/llvm-17/lib/cmake/llvm17; do
+              [ -f "$c/LLVMConfig.cmake" ] && { LLVM_DIR="$c"; break; }
+            done
+            if [ -z "$LLVM_DIR" ]; then
+              echo "::error::pre-built Kotoamatsukami.so is absent from branch $BRANCH and no LLVM 17 cmake package is installed, so the plugin cannot be built either"
+              exit 1
             fi
             cmake -G Ninja -DLLVM_DIR="$LLVM_DIR" -DCMAKE_BUILD_TYPE=Release .. 2>&1 | tail -5
             ninja -j$(nproc) 2>&1 | tail -5
