@@ -250,7 +250,7 @@ jobs:
             --base-iso $WORK/base.iso
             --kernel-dir $WORK/kdir
             --out $WORK/out
-            --name "AnyRealm-NUKI-NURFS-desktop-6.12-amd64.iso"
+            --name "dark-hunter.iso"
           )
           # if/then, not `[ ... ] && args+=(...)`: under set -e a false test
           # makes the whole && expression return 1 and kills the step.
@@ -267,7 +267,7 @@ jobs:
       - name: Report the result
         run: |
           set -euo pipefail
-          ISO=$WORK/out/AnyRealm-NUKI-NURFS-desktop-6.12-amd64.iso
+          ISO=$WORK/out/dark-hunter.iso
           ls -l "$ISO"
           echo "--- boot records"
           xorriso -indev "$ISO" -report_el_torito plain 2>/dev/null | grep -E "El Torito"
@@ -300,12 +300,12 @@ jobs:
       - name: Upload the ISO
         uses: actions/upload-artifact@v7
         with:
-          name: darkmatter-nhpro-iso-x86_64
+          name: dark-hunter-iso-x86_64
           # Relative to the workspace.  $WORK is a shell variable and is NOT
           # expanded in a `with:` block -- the first attempt silently uploaded
           # nothing ("No files were found with the provided path: $WORK/...").
           path: |
-            build/out/AnyRealm-NUKI-NURFS-desktop-6.12-amd64.iso
+            build/out/dark-hunter.iso
             build/out/ISO-INFO.txt
           compression-level: 0
           if-no-files-found: error

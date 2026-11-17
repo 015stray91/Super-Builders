@@ -72,7 +72,10 @@ NH_APK_SRC=""
 # scripts) resolve regardless of the caller's working directory.
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUT_DIR="$PWD/out"
-ISO_NAME="AnyRealm-NUKI-NURFS-desktop-amd64.iso"
+# The fusion has one name. It is neither the builder appliance nor a bare
+# DarkMatter or NetHunter image: it is the DarkMatter + NetHunter Pro rootfs
+# fused into one -- hence dark-hunter.
+ISO_NAME="dark-hunter.iso"
 MAKE_ISO=1
 KEEP_WORK=0
 NO_FUSE=0
@@ -1118,7 +1121,10 @@ if [ "$MAKE_ISO" -eq 1 ]; then
     # -iso-level 3 allows files over 4 GiB.  The tree no longer needs it, but
     # the Kali rootfs still rides along as one large file and level 3 costs
     # nothing -- both El Torito entries are still written.
-    args=(-as mkisofs -R -iso-level 3 -V "ANYREALM_NUKI" -o "$OUT_ISO")
+    # Volume label matches the artefact: DARK_HUNTER, so a mounted or looped
+    # image identifies itself as this fusion rather than as a generic AnyRealm
+    # build.
+    args=(-as mkisofs -R -iso-level 3 -V "DARK_HUNTER" -o "$OUT_ISO")
     if [ -n "$BOOT_BIOS" ]; then
         args+=(-b isolinux/isolinux.bin -c isolinux/boot.cat
                -no-emul-boot -boot-load-size 4 -boot-info-table)
