@@ -135,12 +135,25 @@ jobs:
       - name: Normalise the kernel payload
         run: |
           set -euo pipefail
-          # The artifact nests things a couple of levels deep (boot/, out/).
-          V=$(find $WORK/kern -name vmlinuz -type f -print -quit)
-          [ -n "$V" ] || { echo "no vmlinuz in artifact" >&2; exit 1; }
+          # The artifact nests things a couple of levels deep (boot/, out/), and
+          # the kernel build uploads it under BOTH names: boot/vmlinuz is a copy of
+          # arch/x86/boot/bzImage.  Matching only "vmlinuz" failed on a download
+          # that unpacked to bzImage alone, so accept either and say which was
+          # taken -- a silent fallback here would be indistinguishable from a
+          # wrong kernel.
+          V=$(find $WORK/kern \( -name vmlinuz -o -name bzImage \) -type f -print -quit)
+          [ -n "$V" ] || {
+            echo "::error::no vmlinuz or bzImage in the artifact; contents:"
+            find $WORK/kern -maxdepth 4 -type f -printf '  %p\n' >&2
+            exit 1
+          }
+          echo "kernel image: $V"
           mkdir -p $WORK/kdir
           cp "$V" $WORK/kdir/vmlinuz
           M=$(find $WORK/kern -type d -path '*lib/modules/*' -name '6.12*' -print -quit)
+          # modules_install writes lib/modules/<release>/, so the tree name is the
+          # release and not a fixed string.  Report it when found.
+          [ -z "$M" ] || echo "modules: $M"
           if [ -n "$M" ]; then
             mkdir -p $WORK/kdir/modules/lib/modules
             cp -a "$M" $WORK/kdir/modules/lib/modules/

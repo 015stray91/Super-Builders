@@ -1,0 +1,10 @@
+# Labels that exist on the project's own build VM.
+#
+# actionlint only knows GitHub's hosted labels, so a workflow targeting the
+# self-hosted runner trips its "unknown label" check. Declaring the label here
+# keeps actionlint useful for the things it is good at (expressions, shell
+# quoting, action inputs) without it flagging the runner by name.
+self-hosted-runner:
+  labels:
+    - anyrealm-vm
+    - buildvm
