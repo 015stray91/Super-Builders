@@ -201,6 +201,30 @@ the DarkMatter ISO. The two must not be crossed. The profile previously pointed
 `genevn-g` at `kernel-msm-1`, which was wrong — that repo holds only
 `README.md`, `CROSS_REFERENCES.md` and `fs/koto/`.
 
+### The tree is self-sufficient, and its build.config glue is deliberately gone
+
+AR-NUKI-genevn is not a mirror of any upstream branch. It carries its own
+`KernelSU-Next/`, its own `nuki-colonel.config`, and its own config chain. The
+`build.config.*` scaffolding at the top level is **legacy and partly broken on
+purpose**: several of those files still `. ${ROOT_DIR}/build.config.common`, and
+`build.config.common` is not in the tree.
+
+That is not an oversight to "fix". Those scripts kept re-deriving the config and
+overwriting local modifications, so they were removed and the build stopped
+using them entirely. `build-ksu-next.yml` runs:
+
+```sh
+python3 scripts/kconfig/merge_nuki.py \
+  arch/arm64/configs/ksu-nh.defconfig \
+  <vendor_config> <debug_config> <nurfs_fragment> -o out/.config
+```
+
+`merge_nuki.py` is in-tree, takes the files positionally, and is the only thing
+that produces `.config`. **Do not restore `build.config.common` or re-point the
+build at `build.config.anyrealm.kernel`** — doing so reintroduces the overwrite
+problem the removal was meant to solve. Treat the `build.config.*` files as
+reference documentation of what the upstream GKI build used to do, nothing more.
+
 Note on the release it launched on: this device started on **Android 12**, not
 13. Documentation that says 13 is wrong; the 2023 model and the 2024 model share
 the SM6450 SoC, which is where the confusion comes from.
