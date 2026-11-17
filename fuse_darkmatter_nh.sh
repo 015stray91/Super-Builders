@@ -79,7 +79,6 @@ EXTRA_PKGS=""
 # is where the kernel's fw_path points.  See stage_firmware() for why the deb's
 # own /usr/lib layout cannot be copied verbatim.
 FIRMWARE_SRC=""
-FIRMWARE_SRC=""
 # Directory containing this script, so helper files (installer/, the patch
 # scripts) resolve regardless of the caller's working directory.
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -857,23 +856,41 @@ KPROF
         if [ -n "$EXTRA_PKGS" ]; then
             note "Installing extra packages into the merged tree: $EXTRA_PKGS"
             install_pkgs_into_tree "$SYS" "$EXTRA_PKGS" || true
+        fi
 
-            # Firmware after packages, so a firmware-nonfree deb installed by
-            # --pkgs is also picked up if --firmware was not given explicitly.
-            if [ -n "$FIRMWARE_SRC" ]; then
-                # Repeatable: --firmware a.deb --firmware b.deb, or one
-                # comma-separated list.  Each package adds its own trees
-                # (amdgpu/, rtw88/, rtl_bt/, ...) without disturbing the others.
-                _ifs="$IFS"; IFS=','
-                for _fw in $FIRMWARE_SRC; do
-                    IFS="$_ifs"
-                    [ -n "$_fw" ] || { IFS=','; continue; }
-                    stage_firmware "$_fw" "$SYS" || true
-                    IFS=','
-                done
+        # Device firmware.  NOT inside the --pkgs block: firmware is its own
+        # concern and the ISO build passes --firmware without --pkgs.  Nested
+        # there, every image so far shipped an amdgpu driver with no microcode
+        # and a Wi-Fi driver with no blob, and said nothing.
+        #
+        # It still runs after packages, so a firmware-nonfree deb installed via
+        # --pkgs is picked up when --firmware was not given explicitly.
+        if [ -n "$FIRMWARE_SRC" ]; then
+            note "Staging device firmware"
+            _fw_fail=0
+            _fw_ok=0
+            _ifs="$IFS"; IFS=','
+            for _fw in $FIRMWARE_SRC; do
                 IFS="$_ifs"
-                unset _ifs _fw
+                [ -n "$_fw" ] || { IFS=','; continue; }
+                if stage_firmware "$_fw" "$SYS"; then
+                    _fw_ok=$((_fw_ok + 1))
+                else
+                    echo "  firmware: FAILED to stage $_fw"
+                    _fw_fail=$((_fw_fail + 1))
+                fi
+                IFS=','
+            done
+            IFS="$_ifs"
+            unset _ifs _fw
+            FK="$SYS/lib/firmware"
+            echo "  firmware staged from $_fw_ok package(s); $FK has $(sudo find "$FK" -maxdepth 1 -mindepth 1 2>/dev/null | wc -l) top-level entries"
+            # A GPU with no microcode falls back to efifb at 1024x768; a Wi-Fi
+            # card with no blob never appears.  Neither is a silent success.
+            if [ "$_fw_fail" -gt 0 ]; then
+                die "$_fw_fail firmware package(s) failed to stage -- the image would boot without working devices"
             fi
+            unset _fw_fail _fw_ok
         fi
 
         rm -f "$WORK/kali.files" "$WORK/android.before"
